@@ -30,12 +30,10 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 export function Dashboard({ onLogout }: { onLogout: () => void }) {
     const queryClient = useQueryClient();
 
-
     const {
         store, folders, activeFolderId, setActiveFolderId, isSyncing, isConnected,
-        handleLogout, handleSyncFolders, handleCreateFolder, handleFolderDelete
+        handleLogout, handleSyncFolders, handleCreateFolder, handleFolderRename, handleFolderDelete
     } = useTelegramConnection(onLogout);
-
 
     const [previewFile, setPreviewFile] = useState<TelegramFile | null>(null);
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -70,7 +68,6 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
         }
     }, [store, viewMode]);
 
-
     const { data: allFiles = [], isLoading, error } = useQuery({
         queryKey: ['files', activeFolderId],
         queryFn: () => invoke<any[]>('cmd_get_files', { folderId: activeFolderId }).then(res => res.map(f => ({
@@ -92,16 +89,13 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
         enabled: !!store
     });
 
-
     const {
-        handleDelete, handleBulkDelete, handleBulkDownload,
+        handleDelete, handleRename, handleBulkDelete, handleBulkDownload,
         handleBulkMove, handleDownloadFolder, handleGlobalSearch
-
     } = useFileOperations(activeFolderId, selectedIds, setSelectedIds, displayedFiles);
 
     const { uploadQueue, setUploadQueue, handleManualUpload, cancelAll: cancelUploads, cancelItem: cancelUploadItem, retryItem: retryUploadItem, isDragging } = useFileUpload(activeFolderId, store);
     const { downloadQueue, queueDownload, clearFinished: clearDownloads, cancelAll: cancelDownloads, cancelItem: cancelDownloadItem, retryItem: retryDownloadItem } = useFileDownload(store);
-
 
     const handleSelectAll = useCallback(() => {
         setSelectedIds(displayedFiles.map(f => f.id));
@@ -148,9 +142,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
         onEscape: handleEscape,
         onSearch: handleFocusSearch,
         onEnter: handleEnter,
-        enabled: !previewFile && !playingFile && !pdfFile && !showMoveModal // Disable when modals are open
+        enabled: !previewFile && !playingFile && !pdfFile && !showMoveModal
     });
-
 
     useEffect(() => {
         setSelectedIds([]);
@@ -163,7 +156,6 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
         setPreviewContextFiles([]);
         setPreviewContextIndex(-1);
     }, [activeFolderId]);
-
 
     useEffect(() => {
         if (searchTerm.length <= 2) {
@@ -180,9 +172,6 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
         return () => clearTimeout(timer);
     }, [searchTerm]);
-
-
-
 
     const handleFileClick = (e: React.MouseEvent, id: number) => {
         e.stopPropagation();
@@ -324,7 +313,6 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
         ? "Saved Messages"
         : folders.find(f => f.id === activeFolderId)?.name || "Folder";
 
-
     const handleRootDragOver = (e: React.DragEvent) => {
         if (internalDragRef.current) {
             e.preventDefault();
@@ -350,7 +338,6 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
             onDragOver={handleRootDragOver}
             onDragEnter={handleRootDragEnter}
         >
-
             <ExternalDropBlocker onUploadClick={handleManualUpload} />
 
             <AnimatePresence>
@@ -396,6 +383,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                 setActiveFolderId={setActiveFolderId}
                 onDrop={handleDropOnFolder}
                 onDelete={handleFolderDelete}
+                onRename={handleFolderRename}
                 onCreate={handleCreateFolder}
                 isSyncing={isSyncing}
                 isConnected={isConnected}
@@ -425,7 +413,6 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                     </div>
                 )}
                 <FileExplorer
-
                     files={displayedFiles}
                     loading={isLoading || isSearching}
                     error={error}
@@ -434,6 +421,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                     activeFolderId={activeFolderId}
                     onFileClick={handleFileClick}
                     onDelete={handleDelete}
+                    onRename={handleRename}
                     onDownload={(id, name) => queueDownload(id, name, activeFolderId)}
                     onPreview={handlePreview}
                     onManualUpload={handleManualUpload}
@@ -458,7 +446,6 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                     prevFile={previewNeighbors.prevFile}
                 />
             )}
-
 
             <UploadQueue
                 items={uploadQueue}

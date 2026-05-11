@@ -128,14 +128,17 @@ export function AuthWizard({ onLogin }: { onLogin: () => void }) {
     const handleQrLogin = async () => {
         setError(null);
         setLoading(true);
+        console.log("[AUTH] handleQrLogin called");
         try {
             const idInt = parseInt(apiId, 10);
             if (isNaN(idInt)) throw new Error("API ID must be a number");
+            console.log("[AUTH] Invoking cmd_auth_qr_login...");
 
             const url = await invoke<string>("cmd_auth_qr_login", {
                 apiId: idInt,
                 apiHash: apiHash
             });
+            console.log("[AUTH] cmd_auth_qr_login returned:", url ? "(url received)" : "(empty)");
 
             if (url === "__authorized__") {
                 onLogin();
@@ -145,6 +148,7 @@ export function AuthWizard({ onLogin }: { onLogin: () => void }) {
             setQrUrl(url);
             setQrPolling(true);
         } catch (err: unknown) {
+            console.log("[AUTH] cmd_auth_qr_login error:", err instanceof Error ? err.message : String(err));
             setError(err instanceof Error ? err.message : String(err));
         } finally {
             setLoading(false);
@@ -190,18 +194,23 @@ export function AuthWizard({ onLogin }: { onLogin: () => void }) {
         e.preventDefault();
         setLoading(true);
         setError(null);
+        console.log("[AUTH] handlePhoneSubmit called with phone:", phone);
+        console.log("[AUTH] apiId:", apiId, "apiHash:", apiHash ? "(set)" : "(empty)");
         try {
             const idInt = parseInt(apiId, 10);
             if (isNaN(idInt)) throw new Error("API ID must be a number");
 
-            await invoke("cmd_auth_request_code", {
+            console.log("[AUTH] Invoking cmd_auth_request_code...");
+            const result = await invoke("cmd_auth_request_code", {
                 phone,
                 apiId: idInt,
                 apiHash: apiHash
             });
+            console.log("[AUTH] cmd_auth_request_code returned:", result);
             setStep("code");
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : JSON.stringify(err);
+            console.log("[AUTH] cmd_auth_request_code error:", msg);
             if (msg.includes("FLOOD_WAIT_")) {
                 const parts = msg.split("FLOOD_WAIT_");
                 if (parts[1]) {

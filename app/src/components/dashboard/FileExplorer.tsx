@@ -6,6 +6,7 @@ import { EmptyState } from './EmptyState';
 import { TelegramFile } from '../../types';
 import { ContextMenu } from './ContextMenu';
 import { FileListItem } from './FileListItem';
+import { RenameModal } from './RenameModal';
 
 type SortField = 'name' | 'size' | 'date';
 type SortDirection = 'asc' | 'desc';
@@ -19,6 +20,7 @@ interface FileExplorerProps {
     activeFolderId: number | null;
     onFileClick: (e: React.MouseEvent, id: number) => void;
     onDelete: (id: number) => void;
+    onRename: (id: number, currentName: string, newName: string) => void;
     onDownload: (id: number, name: string) => void;
     onPreview: (file: TelegramFile, orderedFiles?: TelegramFile[]) => void;
     onManualUpload: () => void;
@@ -58,11 +60,12 @@ function useGridColumns(containerRef: React.RefObject<HTMLDivElement | null>) {
 
 export function FileExplorer({
     files, loading, error, viewMode, selectedIds, activeFolderId,
-    onFileClick, onDelete, onDownload, onPreview, onManualUpload, onSelectionClear, onToggleSelection, onDrop, onDragStart, onDragEnd
+    onFileClick, onDelete, onRename, onDownload, onPreview, onManualUpload, onSelectionClear, onToggleSelection, onDrop, onDragStart, onDragEnd
 }: FileExplorerProps) {
     const [sortField, setSortField] = useState<SortField>('name');
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; file: TelegramFile } | null>(null);
+    const [renameFile, setRenameFile] = useState<TelegramFile | null>(null);
 
     const parentRef = useRef<HTMLDivElement>(null);
     const { columns, containerWidth } = useGridColumns(parentRef);
@@ -343,6 +346,10 @@ export function FileExplorer({
                         onDelete(contextMenu.file.id);
                         setContextMenu(null);
                     }}
+                    onRename={() => {
+                        setRenameFile(contextMenu.file);
+                        setContextMenu(null);
+                    }}
                     onPreview={() => {
                         if (contextMenu.file.type === 'folder') {
                             onFileClick({ preventDefault: () => { }, stopPropagation: () => { } } as React.MouseEvent, contextMenu.file.id);
@@ -351,6 +358,15 @@ export function FileExplorer({
                         }
                         setContextMenu(null);
                     }}
+                />
+            )}
+
+            {renameFile && (
+                <RenameModal
+                    type={renameFile.type === 'folder' ? 'folder' : 'file'}
+                    currentName={renameFile.name}
+                    onClose={() => setRenameFile(null)}
+                    onRename={(newName) => onRename(renameFile.id, renameFile.name, newName)}
                 />
             )}
         </div>

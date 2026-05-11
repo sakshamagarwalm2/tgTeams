@@ -295,6 +295,140 @@ pub async fn cmd_upload_file(
 }
 
 #[tauri::command]
+pub async fn cmd_rename_folder(
+    folder_id: i64,
+    new_name: String,
+    state: State<'_, TelegramState>,
+) -> Result<bool, String> {
+    let client_opt = { state.client.lock().await.clone() };
+    if client_opt.is_none() {
+        log::info!("[MOCK] Renamed folder ID {} to {}", folder_id, new_name);
+        return Ok(true);
+    }
+    let client = client_opt.unwrap();
+log::info!("[RENAME_FOLDER] folder_id={}, new_name='{}'", folder_id, new_name);
+    println!("[RENAME_FOLDER] folder_id={}, new_name='{}'", folder_id, new_name);
+
+    let peer = resolve_peer(&client, Some(folder_id), &state.peer_cache).await?;
+    let input_channel = match peer {
+        Peer::Channel(c) => {
+            let chan = &c.raw;
+            tl::enums::InputChannel::Channel(tl::types::InputChannel {
+                channel_id: chan.id,
+                access_hash: chan.access_hash.ok_or("No access hash for channel")?,
+            })
+        }
+        _ => return Err("Only channels (folders) can be renamed.".to_string()),
+    };
+
+    let target_title = format!("{} [TD]", new_name);
+    log::info!("[RENAME_FOLDER] Target title on Telegram will be: '{}'", target_title);
+    println!("[RENAME_FOLDER] Target title on Telegram will be: '{}'", target_title);
+
+    // Fetch fresh channel info from Telegram to get current title
+    log::info!("[RENAME_FOLDER] Fetching current channel info from Telegram...");
+    println!("[RENAME_FOLDER] Fetching current channel info from Telegram...");
+    let current_title = match client.invoke(&tl::functions::channels::GetFullChannel {
+        channel: input_channel.clone(),
+    }).await {
+        Ok(tl::enums::messages::ChatFull::Full(f)) => {
+            let channel_opt = f.chats.iter().find_map(|c| {
+                if let tl::enums::Chat::Channel(chan) = c {
+                    Some(chan)
+                } else {
+                    None
+                }
+            });
+            match channel_opt {
+                Some(c) => {
+                    log::info!("[RENAME_FOLDER] GetFullChannel Response - chats count: {}", f.chats.len());
+                    log::info!("[RENAME_FOLDER] Current title on Telegram: '{}'", c.title);
+                    println!("[RENAME_FOLDER] GetFullChannel Response - chats count: {}", f.chats.len());
+                    println!("[RENAME_FOLDER] Current title on Telegram: '{}'", c.title);
+                    c.title.clone()
+                }
+                None => return Err("Could not read channel info".to_string()),
+            }
+        }
+        Err(e) => return Err(format!("Failed to get channel info: {}", e)),
+    };
+
+    log::info!("[RENAME_FOLDER] Comparing - current='{}' vs target='{}'", current_title, target_title);
+    println!("[RENAME_FOLDER] Comparing - current='{}' vs target='{}'", current_title, target_title);
+
+    if current_title == target_title {
+        log::info!("[RENAME_FOLDER] SKIPPED: No change needed (title already matches)");
+        println!("[RENAME_FOLDER] SKIPPED: No change needed (title already matches)");
+        return Ok(true);
+    }
+
+    log::info!("[RENAME_FOLDER] CHANGE REQUIRED: '{}' -> '{}'", current_title, target_title);
+    println!("[RENAME_FOLDER] CHANGE REQUIRED: '{}' -> '{}'", current_title, target_title);
+    log::info!("[RENAME_FOLDER] Calling channels.editTitle API...");
+    println!("[RENAME_FOLDER] Calling channels.editTitle API...");
+
+    match client.invoke(&tl::functions::channels::EditTitle {
+        channel: input_channel,
+        title: target_title,
+    }).await {
+        Ok(result) => {
+            log::info!("[RENAME_FOLDER] SUCCESS: API response = {:?}", result);
+            println!("[RENAME_FOLDER] SUCCESS: API response = {:?}", result);
+            Ok(true)
+        }
+        Err(e) => {
+            log::error!("[RENAME_FOLDER] FAILED: API error = {}", e);
+            eprintln!("[RENAME_FOLDER] FAILED: API error = {}", e);
+            Err(format!("Failed to rename channel: {}", e))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn cmd_rename_file(
+    message_id: i32,
+    folder_id: Option<i64>,
+    new_name: String,
+    state: State<'_, TelegramState>,
+) -> Result<bool, String> {
+    let client_opt = { state.client.lock().await.clone() };
+    if client_opt.is_none() {
+        log::info!("[MOCK] Renamed message {} in folder {:?} to {}", message_id, folder_id, new_name);
+        return Ok(true);
+    }
+    let client = client_opt.unwrap();
+
+    let peer = resolve_peer(&client, folder_id, &state.peer_cache).await?;
+    let input_peer = match &peer {
+        Peer::Channel(c) => tl::enums::InputPeer::Channel(tl::types::InputPeerChannel {
+            channel_id: c.raw.id,
+            access_hash: c.raw.access_hash.unwrap_or(0),
+        }),
+        Peer::User(u) => tl::enums::InputPeer::User(tl::types::InputPeerUser {
+            user_id: u.raw.id(),
+            access_hash: 0,
+        }),
+        Peer::Group(_) => return Err("Groups are not supported for file operations.".to_string()),
+    };
+
+    client.invoke(&tl::functions::messages::EditMessage {
+        no_webpage: true,
+        peer: input_peer,
+        id: message_id,
+        message: Some(new_name),
+        media: None,
+        reply_markup: None,
+        entities: None,
+        schedule_date: None,
+        invert_media: false,
+        quick_reply_shortcut_id: None,
+        schedule_repeat_period: None,
+    }).await.map_err(|e| format!("Failed to rename file (edit caption): {}", e))?;
+
+    Ok(true)
+}
+
+#[tauri::command]
 pub async fn cmd_delete_file(
     message_id: i32,
     folder_id: Option<i64>,
@@ -457,7 +591,7 @@ pub async fn cmd_get_files(
     let mut msgs = client.iter_messages(&peer);
     while let Some(msg) = msgs.next().await.map_err(|e| e.to_string())? {
         if let Some(doc) = msg.media() {
-            let (name, size, mime, ext) = match doc {
+            let (mut name, size, mime, ext) = match doc {
                 Media::Document(d) => {
                     let n = d.name().to_string();
                     let s = d.size();
@@ -468,6 +602,12 @@ pub async fn cmd_get_files(
                 Media::Photo(_) => ("Photo.jpg".to_string(), 0, Some("image/jpeg".into()), Some("jpg".into())),
                 _ => ("Unknown".to_string(), 0, None, None),
             };
+
+            // Use message text (caption) as rename override if present
+            if !msg.text().is_empty() {
+                name = msg.text().to_string();
+            }
+
             files.push(FileMetadata {
                 id: msg.id() as i64, folder_id, name, size: size as u64, mime_type: mime, file_ext: ext, created_at: msg.date().to_string(), icon_type: "file".into()
             });
@@ -511,10 +651,16 @@ pub async fn cmd_search_global(
             if let tl::enums::Message::Message(m) = msg {
                 if let Some(tl::enums::MessageMedia::Document(d)) = m.media {
                     if let tl::enums::Document::Document(doc) = d.document.unwrap() {
-                        let name = doc.attributes.iter().find_map(|a| match a {
+                        let mut name = doc.attributes.iter().find_map(|a| match a {
                             tl::enums::DocumentAttribute::Filename(f) => Some(f.file_name.clone()),
                             _ => None
                         }).unwrap_or("Unknown".to_string());
+
+                        // Use message text (caption) as rename override if present
+                        if !m.message.is_empty() {
+                            name = m.message.clone();
+                        }
+
                         let size = doc.size as u64;
                         let mime = doc.mime_type.clone();
                         let ext = std::path::Path::new(&name).extension().map(|os| os.to_str().unwrap_or("").to_string());
@@ -537,10 +683,16 @@ pub async fn cmd_search_global(
             if let tl::enums::Message::Message(m) = msg {
                 if let Some(tl::enums::MessageMedia::Document(d)) = m.media {
                     if let tl::enums::Document::Document(doc) = d.document.unwrap() {
-                        let name = doc.attributes.iter().find_map(|a| match a {
+                        let mut name = doc.attributes.iter().find_map(|a| match a {
                             tl::enums::DocumentAttribute::Filename(f) => Some(f.file_name.clone()),
                             _ => None
                         }).unwrap_or("Unknown".to_string());
+
+                        // Use message text (caption) as rename override if present
+                        if !m.message.is_empty() {
+                            name = m.message.clone();
+                        }
+
                         let size = doc.size as u64;
                         let mime = doc.mime_type.clone();
                         let ext = std::path::Path::new(&name).extension().map(|os| os.to_str().unwrap_or("").to_string());

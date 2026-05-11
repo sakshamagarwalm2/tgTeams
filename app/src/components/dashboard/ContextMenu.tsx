@@ -10,10 +10,11 @@ interface ContextMenuProps {
     onClose: () => void;
     onDownload: () => void;
     onDelete: () => void;
+    onRename: () => void;
     onPreview: () => void;
 }
 
-export function ContextMenu({ x, y, file, onClose, onDownload, onDelete, onPreview }: ContextMenuProps) {
+export function ContextMenu({ x, y, file, onClose, onDownload, onDelete, onRename, onPreview }: ContextMenuProps) {
     const [adjustedPos, setAdjustedPos] = useState({ x, y });
     const menuRef = useRef<HTMLDivElement>(null);
 
@@ -95,8 +96,8 @@ export function ContextMenu({ x, y, file, onClose, onDownload, onDelete, onPrevi
                 Download
             </button>
 
-            <button disabled className="flex items-center gap-2 px-2 py-1.5 text-sm text-telegram-subtext hover:bg-telegram-hover rounded transition-colors text-left w-full cursor-not-allowed opacity-50">
-                <Pencil className="w-4 h-4" />
+            <button onClick={onRename} className="flex items-center gap-2 px-2 py-1.5 text-sm text-telegram-text hover:bg-telegram-hover rounded transition-colors text-left w-full">
+                <Pencil className="w-4 h-4 text-telegram-primary" />
                 Rename
             </button>
 

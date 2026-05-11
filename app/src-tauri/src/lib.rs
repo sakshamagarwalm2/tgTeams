@@ -31,7 +31,7 @@ pub struct ActixServerHandle(pub Arc<std::sync::Mutex<Option<actix_web::dev::Ser
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
     let stream_token = generate_stream_token();
 
@@ -98,6 +98,8 @@ pub fn run() {
             commands::cmd_move_files,
             commands::cmd_create_folder,
             commands::cmd_delete_folder,
+            commands::cmd_rename_folder,
+            commands::cmd_rename_file,
             commands::cmd_get_bandwidth,
             commands::cmd_get_preview,
             commands::cmd_logout,

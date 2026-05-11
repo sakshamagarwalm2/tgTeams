@@ -109,9 +109,12 @@ pub async fn cmd_connect(
     state: State<'_, TelegramState>,
     api_id: i32,
 ) -> Result<bool, String> {
+    println!("[AUTH] cmd_connect called with api_id={}", api_id);
+    log::info!("[AUTH] cmd_connect called with api_id={}", api_id);
     // Store API ID for auto-reconnect
     *state.api_id.lock().await = Some(api_id);
     ensure_client_initialized(&app_handle, &state, api_id).await?;
+    println!("[AUTH] cmd_connect completed successfully");
     Ok(true)
 }
 
@@ -220,19 +223,25 @@ pub async fn cmd_auth_request_code(
     let client_handle = ensure_client_initialized(&app_handle, &state, api_id).await?;
     
     log::info!("Requesting code for {}", phone);
+    println!("[AUTH] Requesting code for {}", phone);
     
     let mut last_error = String::new();
     
     // Retry up to 2 times for AUTH_RESTART or 500
     for i in 1..=2 {
+        println!("[AUTH] Attempting request_login_code (attempt {})...", i);
+        log::info!("[AUTH] Attempt {} - calling request_login_code...", i);
         match client_handle.request_login_code(&phone, &api_hash).await {
             Ok(token) => {
+                println!("[AUTH] SUCCESS: Got login token");
+                log::info!("[AUTH] SUCCESS: Got login token");
                 let mut token_guard = state.login_token.lock().await;
                 *token_guard = Some(token);
                 return Ok("code_sent".to_string());
             },
             Err(e) => {
                 let err_msg = e.to_string();
+                println!("[AUTH] FAILED: {}", err_msg);
                 log::warn!("Error requesting code (Attempt {}): {}", i, err_msg);
                 
                 if err_msg.contains("AUTH_RESTART") || err_msg.contains("500") {

@@ -227,6 +227,23 @@ export function useTelegramConnection(onLogoutParent: () => void) {
         }
     };
 
+    const handleFolderRename = async (folderId: number, currentName: string, newName: string) => {
+        console.log("[useTelegramConnection] handleFolderRename called - folderId:", folderId, "currentName:", currentName, "newName:", newName);
+        if (!store) return;
+        try {
+            console.log("[useTelegramConnection] Calling cmd_rename_folder with newName:", newName);
+            await invoke('cmd_rename_folder', { folderId, newName });
+            const updated = folders.map(f => f.id === folderId ? { ...f, name: newName } : f);
+            setFolders(updated);
+            await store.set('folders', updated);
+            await store.save();
+            toast.success(`Folder renamed to "${newName}".`);
+        } catch (e) {
+            toast.error(`Failed to rename folder: ${e}`);
+            throw e;
+        }
+    };
+
     return {
         store,
         folders,
@@ -237,6 +254,7 @@ export function useTelegramConnection(onLogoutParent: () => void) {
         handleLogout,
         handleSyncFolders,
         handleCreateFolder,
+        handleFolderRename,
         handleFolderDelete,
         isNetworkError,
         forceLogout

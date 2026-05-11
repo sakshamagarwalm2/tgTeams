@@ -24,6 +24,16 @@ export function useFileOperations(
         }
     }
 
+    const handleRename = async (id: number, newName: string) => {
+        try {
+            await invoke('cmd_rename_file', { messageId: id, folderId: activeFolderId, newName });
+            queryClient.invalidateQueries({ queryKey: ['files', activeFolderId] });
+            toast.success("File renamed");
+        } catch (e) {
+            toast.error(`Rename failed: ${e}`);
+        }
+    };
+
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;
         if (!await confirm({ title: "Delete Files", message: `Are you sure you want to delete ${selectedIds.length} files?`, confirmText: "Delete All", variant: 'danger' })) return;
@@ -127,6 +137,7 @@ export function useFileOperations(
 
     return {
         handleDelete,
+        handleRename,
         handleBulkDelete,
         handleDownload,
         handleBulkDownload,

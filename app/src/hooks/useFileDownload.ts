@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { tempDir } from '@tauri-apps/api/path';
 import { save, open } from '@tauri-apps/plugin-dialog';
+import { open as shellOpen } from '@tauri-apps/plugin-shell';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { DownloadItem, TelegramFile } from '../types';
@@ -184,6 +186,25 @@ export function useFileDownload(store: Store | null) {
         ));
     };
 
+    const openWithSystemApp = async (messageId: number, filename: string, folderId: number | null) => {
+        toast.info(`Opening ${filename}...`);
+        try {
+            const tempDirPath = await tempDir();
+            const tempPath = `${tempDirPath}${filename}`;
+            
+            await invoke('cmd_download_file', {
+                messageId,
+                savePath: tempPath,
+                folderId,
+            });
+
+            await shellOpen(tempPath);
+            toast.success(`Opened ${filename}`);
+        } catch (e) {
+            toast.error(`Failed to open ${filename}: ${e}`);
+        }
+    };
+
     return {
         downloadQueue,
         queueDownload,
@@ -192,5 +213,6 @@ export function useFileDownload(store: Store | null) {
         cancelAll,
         cancelItem,
         retryItem,
+        openWithSystemApp,
     };
 }

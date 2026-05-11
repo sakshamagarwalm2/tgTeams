@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Eye, HardDrive, Trash2, FolderOpen, Pencil, Play, FileText } from 'lucide-react';
+import { HardDrive, Trash2, FolderOpen, Pencil, FileText } from 'lucide-react';
 import { TelegramFile } from '../../types';
-import { isMediaFile, isPdfFile } from '../../utils';
 
 interface ContextMenuProps {
     x: number;
@@ -11,10 +10,10 @@ interface ContextMenuProps {
     onDownload: () => void;
     onDelete: () => void;
     onRename: () => void;
-    onPreview: () => void;
+    onOpen: () => void;
 }
 
-export function ContextMenu({ x, y, file, onClose, onDownload, onDelete, onRename, onPreview }: ContextMenuProps) {
+export function ContextMenu({ x, y, file, onClose, onDownload, onDelete, onRename, onOpen }: ContextMenuProps) {
     const [adjustedPos, setAdjustedPos] = useState({ x, y });
     const menuRef = useRef<HTMLDivElement>(null);
 
@@ -64,28 +63,14 @@ export function ContextMenu({ x, y, file, onClose, onDownload, onDelete, onRenam
             </div>
 
             {file.type !== 'folder' && (
-                <button onClick={onPreview} className="flex items-center gap-2 px-2 py-1.5 text-sm text-telegram-text hover:bg-telegram-hover rounded transition-colors text-left w-full">
-                    {isMediaFile(file.name) ? (
-                        <>
-                            <Play className="w-4 h-4 text-telegram-primary" />
-                            Play
-                        </>
-                    ) : isPdfFile(file.name) ? (
-                        <>
-                            <FileText className="w-4 h-4 text-red-400" />
-                            View PDF
-                        </>
-                    ) : (
-                        <>
-                            <Eye className="w-4 h-4 text-blue-500" />
-                            Preview
-                        </>
-                    )}
+                <button onClick={onOpen} className="flex items-center gap-2 px-2 py-1.5 text-sm text-telegram-text hover:bg-telegram-hover rounded transition-colors text-left w-full">
+                    <FileText className="w-4 h-4 text-blue-500" />
+                    Open
                 </button>
             )}
 
             {file.type === 'folder' && (
-                <button onClick={onPreview} className="flex items-center gap-2 px-2 py-1.5 text-sm text-telegram-text hover:bg-telegram-hover rounded transition-colors text-left w-full">
+                <button onClick={onOpen} className="flex items-center gap-2 px-2 py-1.5 text-sm text-telegram-text hover:bg-telegram-hover rounded transition-colors text-left w-full">
                     <FolderOpen className="w-4 h-4 text-yellow-500" />
                     Open
                 </button>

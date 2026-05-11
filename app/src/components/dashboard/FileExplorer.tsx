@@ -22,7 +22,7 @@ interface FileExplorerProps {
     onDelete: (id: number) => void;
     onRename: (id: number, currentName: string, newName: string) => void;
     onDownload: (id: number, name: string) => void;
-    onPreview: (file: TelegramFile, orderedFiles?: TelegramFile[]) => void;
+    onOpen: (file: TelegramFile) => void;
     onManualUpload: () => void;
     onSelectionClear: () => void;
     onToggleSelection: (id: number) => void;
@@ -60,7 +60,7 @@ function useGridColumns(containerRef: React.RefObject<HTMLDivElement | null>) {
 
 export function FileExplorer({
     files, loading, error, viewMode, selectedIds, activeFolderId,
-    onFileClick, onDelete, onRename, onDownload, onPreview, onManualUpload, onSelectionClear, onToggleSelection, onDrop, onDragStart, onDragEnd
+    onFileClick, onDelete, onRename, onDownload, onOpen, onManualUpload, onSelectionClear, onToggleSelection, onDrop, onDragStart, onDragEnd
 }: FileExplorerProps) {
     const [sortField, setSortField] = useState<SortField>('name');
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -99,9 +99,9 @@ export function FileExplorer({
         });
     }, [files, sortField, sortDirection]);
 
-    const handlePreviewRequest = useCallback((file: TelegramFile) => {
-        onPreview(file, sortedFiles);
-    }, [onPreview, sortedFiles]);
+    const handleOpenRequest = useCallback((file: TelegramFile) => {
+        onOpen(file);
+    }, [onOpen]);
 
 
     const gridRows = useMemo(() => {
@@ -251,7 +251,7 @@ export function FileExplorer({
                                                 onContextMenu={(e) => handleContextMenu(e, file)}
                                                 onDelete={() => onDelete(file.id)}
                                                 onDownload={() => onDownload(file.id, file.name)}
-                                                onPreview={() => handlePreviewRequest(file)}
+                                                onOpen={() => handleOpenRequest(file)}
                                                 onDrop={onDrop}
                                                 onDragStart={onDragStart}
                                                 onDragEnd={onDragEnd}
@@ -321,7 +321,7 @@ export function FileExplorer({
                                         onDragStart={onDragStart}
                                         onDragEnd={onDragEnd}
                                         onDrop={onDrop}
-                                        onPreview={handlePreviewRequest}
+                                        onOpen={handleOpenRequest}
                                         onDownload={onDownload}
                                         onDelete={onDelete}
                                     />
@@ -350,11 +350,11 @@ export function FileExplorer({
                         setRenameFile(contextMenu.file);
                         setContextMenu(null);
                     }}
-                    onPreview={() => {
+                    onOpen={() => {
                         if (contextMenu.file.type === 'folder') {
                             onFileClick({ preventDefault: () => { }, stopPropagation: () => { } } as React.MouseEvent, contextMenu.file.id);
                         } else {
-                            handlePreviewRequest(contextMenu.file);
+                            handleOpenRequest(contextMenu.file);
                         }
                         setContextMenu(null);
                     }}

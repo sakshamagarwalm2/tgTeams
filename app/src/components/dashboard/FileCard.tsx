@@ -9,7 +9,7 @@ interface FileCardProps {
     file: TelegramFile;
     onDelete: () => void;
     onDownload: () => void;
-    onPreview?: () => void;
+    onOpen?: () => void;
     isSelected: boolean;
     onClick?: (e: React.MouseEvent) => void;
     onContextMenu?: (e: React.MouseEvent) => void;
@@ -27,7 +27,7 @@ function isImageFile(filename: string): boolean {
     return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext);
 }
 
-export function FileCard({ file, onDelete, onDownload, onPreview, isSelected, onClick, onContextMenu, onDrop, onDragStart, onDragEnd, activeFolderId, height, onToggleSelection }: FileCardProps) {
+export function FileCard({ file, onDelete, onDownload, onOpen, isSelected, onClick, onContextMenu, onDrop, onDragStart, onDragEnd, activeFolderId, height, onToggleSelection }: FileCardProps) {
     const isFolder = file.type === 'folder';
     const [isDragOver, setIsDragOver] = useState(false);
     const [thumbnail, setThumbnail] = useState<string | null>(null);
@@ -143,7 +143,7 @@ export function FileCard({ file, onDelete, onDownload, onPreview, isSelected, on
 
                 {/* Quick actions on hover */}
                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 z-10">
-                    <button onClick={(e) => { e.stopPropagation(); if (onPreview) onPreview() }} className="file-action-btn p-1 bg-black/50 rounded-full hover:bg-telegram-primary hover:text-white text-white/70" title="Preview">
+                    <button onClick={(e) => { e.stopPropagation(); if (onOpen) onOpen() }} className="file-action-btn p-1 bg-black/50 rounded-full hover:bg-telegram-primary hover:text-white text-white/70" title="Open">
                         <Eye className="w-3 h-3" />
                     </button>
                     <button onClick={(e) => { e.stopPropagation(); onDownload() }} className="file-action-btn p-1 bg-black/50 rounded-full hover:bg-green-500 hover:text-white text-white/70" title="Download">

@@ -113,6 +113,18 @@ pub fn run() {
             commands::cmd_cancel_transfer,
             commands::cmd_auth_qr_login,
             commands::cmd_auth_qr_poll,
+            commands::cmd_get_teams,
+            commands::cmd_get_team_members,
+            commands::cmd_create_team,
+            commands::cmd_delete_team,
+            commands::cmd_edit_team,
+            commands::cmd_add_team_member,
+            commands::cmd_remove_team_member,
+            commands::cmd_set_member_role,
+            commands::cmd_search_users,
+            commands::cmd_send_team_message,
+            commands::cmd_get_team_messages,
+            commands::cmd_download_team_media,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

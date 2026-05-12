@@ -36,6 +36,7 @@ pub mod preview;
 pub mod utils;
 pub mod network;
 pub mod streaming;
+pub mod teams;
 
 pub use auth::*;
 pub use fs::*;
@@ -43,3 +44,4 @@ pub use preview::*;
 pub use utils::*;
 pub use network::*;
 pub use streaming::*;
+pub use teams::*;

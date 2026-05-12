@@ -147,6 +147,34 @@ body,
   background: rgba(36, 129, 204, 0.6);
 }
 
+/* Custom scrollbar utility class */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 99px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(36, 129, 204, 0.6);
+}
+
+/* Custom scrollbar - Light */
+:root.light .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+:root.light .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(36, 129, 204, 0.5);
+}
+
 /* Custom Scrollbar - Light */
 :root.light ::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.15);

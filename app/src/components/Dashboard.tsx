@@ -11,6 +11,7 @@ import { formatBytes } from '../utils';
 import { Sidebar } from './dashboard/Sidebar';
 import { TopBar } from './dashboard/TopBar';
 import { FileExplorer } from './dashboard/FileExplorer';
+import { TeamChat } from './dashboard/TeamChat';
 import { UploadQueue } from './dashboard/UploadQueue';
 import { DownloadQueue } from './dashboard/DownloadQueue';
 import { MoveToFolderModal } from './dashboard/MoveToFolderModal';
@@ -39,7 +40,22 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     const [searchResults, setSearchResults] = useState<TelegramFile[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [internalDragFileId, _setInternalDragFileId] = useState<number | null>(null);
+    const [activeGroupId, setActiveGroupId] = useState<number | null>(null);
+    const [groups, setGroups] = useState<{id: number, name: string, username: string | null, member_count: number}[]>([]);
     const internalDragRef = useRef<number | null>(null);
+
+    const loadGroups = async () => {
+        try {
+            const result = await invoke<{id: number, name: string, username: string | null, member_count: number}[]>('cmd_get_teams');
+            setGroups(result);
+        } catch (e) {
+            console.error('Failed to load groups:', e);
+        }
+    };
+
+    useEffect(() => {
+        loadGroups();
+    }, []);
 
     const setInternalDragFileId = (id: number | null) => {
         internalDragRef.current = id;
@@ -251,6 +267,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                 folders={folders}
                 activeFolderId={activeFolderId}
                 setActiveFolderId={setActiveFolderId}
+                activeGroupId={activeGroupId}
+                setActiveGroupId={setActiveGroupId}
                 onDrop={handleDropOnFolder}
                 onDelete={handleFolderDelete}
                 onRename={handleFolderRename}
@@ -262,45 +280,54 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                 bandwidth={bandwidth || null}
             />
 
-            <main className="flex-1 flex flex-col" onClick={(e) => { if (e.target === e.currentTarget) setSelectedIds([]); }}>
-                <TopBar
-                    currentFolderName={currentFolderName}
-                    selectedIds={selectedIds}
-                    onShowMoveModal={() => setShowMoveModal(true)}
-                    onBulkDownload={handleBulkDownload}
-                    onBulkDelete={handleBulkDelete}
-                    onDownloadFolder={handleDownloadFolder}
-                    viewMode={viewMode}
-                    setViewMode={setViewMode}
-                    searchTerm={searchTerm}
-                    onSearchChange={setSearchTerm}
-                />
-                {searchTerm.length > 2 && (
-                    <div className="px-6 pt-4 pb-0">
-                        <h2 className="text-sm font-medium text-telegram-subtext">
-                            Search Results for <span className="text-telegram-primary">"{searchTerm}"</span>
-                        </h2>
-                    </div>
+            <main className="flex-1 flex flex-col overflow-hidden" onClick={(e) => { if (e.target === e.currentTarget) setSelectedIds([]); }}>
+                {activeGroupId !== null ? (
+                    <TeamChat 
+                        groupId={activeGroupId} 
+                        groupName={groups.find(g => g.id === activeGroupId)?.name || 'Group Chat'}
+                    />
+                ) : (
+                    <>
+                        <TopBar
+                            currentFolderName={currentFolderName}
+                            selectedIds={selectedIds}
+                            onShowMoveModal={() => setShowMoveModal(true)}
+                            onBulkDownload={handleBulkDownload}
+                            onBulkDelete={handleBulkDelete}
+                            onDownloadFolder={handleDownloadFolder}
+                            viewMode={viewMode}
+                            setViewMode={setViewMode}
+                            searchTerm={searchTerm}
+                            onSearchChange={setSearchTerm}
+                        />
+                        {searchTerm.length > 2 && (
+                            <div className="px-6 pt-4 pb-0">
+                                <h2 className="text-sm font-medium text-telegram-subtext">
+                                    Search Results for <span className="text-telegram-primary">"{searchTerm}"</span>
+                                </h2>
+                            </div>
+                        )}
+                        <FileExplorer
+                            files={displayedFiles}
+                            loading={isLoading || isSearching}
+                            error={error}
+                            viewMode={viewMode}
+                            selectedIds={selectedIds}
+                            activeFolderId={activeFolderId}
+                            onFileClick={handleFileClick}
+                            onDelete={handleDelete}
+                            onRename={handleRename}
+                            onDownload={(id, name) => queueDownload(id, name, activeFolderId)}
+                            onOpen={handleOpenFile}
+                            onManualUpload={handleManualUpload}
+                            onSelectionClear={() => setSelectedIds([])}
+                            onToggleSelection={handleToggleSelection}
+                            onDrop={handleDropOnFolder}
+                            onDragStart={(fileId) => setInternalDragFileId(fileId)}
+                            onDragEnd={() => setTimeout(() => setInternalDragFileId(null), 50)}
+                        />
+                    </>
                 )}
-                <FileExplorer
-                    files={displayedFiles}
-                    loading={isLoading || isSearching}
-                    error={error}
-                    viewMode={viewMode}
-                    selectedIds={selectedIds}
-                    activeFolderId={activeFolderId}
-                    onFileClick={handleFileClick}
-                    onDelete={handleDelete}
-                    onRename={handleRename}
-                    onDownload={(id, name) => queueDownload(id, name, activeFolderId)}
-                    onOpen={handleOpenFile}
-                    onManualUpload={handleManualUpload}
-                    onSelectionClear={() => setSelectedIds([])}
-                    onToggleSelection={handleToggleSelection}
-                    onDrop={handleDropOnFolder}
-                    onDragStart={(fileId) => setInternalDragFileId(fileId)}
-                    onDragEnd={() => setTimeout(() => setInternalDragFileId(null), 50)}
-                />
             </main>
 
             <UploadQueue

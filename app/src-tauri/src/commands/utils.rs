@@ -34,6 +34,15 @@ pub async fn resolve_peer(
             let peer_id = match &dialog.peer {
                 Peer::Channel(c) => Some(c.raw.id),
                 Peer::User(u) => Some(u.raw.id()),
+                Peer::Group(g) => {
+                    // Groups wrap a Channel struct, get the ID from there
+                    let id = match &g.raw {
+                        grammers_tl_types::enums::Chat::Channel(c) => c.id,
+                        grammers_tl_types::enums::Chat::Chat(c) => c.id,
+                        _ => return Err("Unknown group type".to_string()),
+                    };
+                    Some(id)
+                },
                 _ => None,
             };
             if let Some(id) = peer_id {

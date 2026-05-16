@@ -1,5 +1,8 @@
 export interface TelegramFile {
     id: number;
+    folder_id?: number | null;
+    virtual_folder_id?: number | null;
+    parent_virtual_folder_id?: number | null;
     name: string;
     size: number;
     sizeStr: string; // Formatted size
@@ -20,6 +23,7 @@ export interface QueueItem {
     id: string;
     path: string;
     folderId: number | null;
+    virtualFolderId?: number | null;
     status: 'pending' | 'uploading' | 'success' | 'error' | 'cancelled';
     error?: string;
     progress?: number; // 0-100

@@ -3,7 +3,6 @@ use actix_cors::Cors;
 use crate::commands::TelegramState;
 use crate::commands::utils::resolve_peer;
 use grammers_client::types::Media;
-use grammers_tl_types as tl;
 
 use std::sync::Arc;
 
@@ -156,45 +155,36 @@ async fn stream_avatar(
     };
 
     if let Some(client) = client_opt {
-        // Resolve the user to get a User object with photo
         let peer = match resolve_peer(&client, Some(uid), &data.peer_cache).await {
             Ok(p) => p,
-            Err(_) => return HttpResponse::NotFound().body("User not found"),
+            Err(_) => return HttpResponse::NotFound().body("Peer not found"),
         };
 
-        if let grammers_client::types::Peer::User(user) = peer {
-            // For users, the photo is available through the raw TL type or we can fetch it.
-            let photo_opt: Option<grammers_client::types::ChatPhoto> = match &user.raw {
-                tl::enums::User::User(u) => match &u.photo {
-                    Some(tl::enums::UserProfilePhoto::Photo(_p)) => {
-                        // UserProfilePhoto is not directly downloadable, we need to convert it.
-                        None
-                    },
-                    _ => None,
-                },
-                _ => None,
-            };
-
-            if let Some(photo) = photo_opt {
+        let mut photos = client.iter_profile_photos(&peer);
+        match photos.next().await {
+            Ok(Some(photo)) => {
                 let mut download_iter = client.iter_download(&photo);
                 let stream = async_stream::stream! {
                     while let Some(chunk) = download_iter.next().await.transpose() {
                         match chunk {
                             Ok(bytes) => yield Ok::<_, actix_web::Error>(web::Bytes::from(bytes)),
                             Err(e) => {
-                                log::error!("Avatar stream error on user {}: {}", uid, e);
+                                log::error!("Avatar stream error on peer {}: {}", uid, e);
                                 break;
                             }
                         }
                     }
                 };
-                
+
                 return HttpResponse::Ok()
                     .insert_header(("Content-Type", "image/jpeg"))
                     .insert_header(("Cache-Control", "private, max-age=3600"))
                     .streaming(stream);
-            }
+            },
+            Ok(None) => {},
+            Err(e) => log::warn!("Avatar request failed while fetching photos for peer {}: {}", uid, e),
         }
+
         HttpResponse::NotFound().body("Avatar not found")
     } else {
         HttpResponse::ServiceUnavailable().body("Telegram client not connected")

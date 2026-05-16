@@ -16,7 +16,7 @@ interface ProgressPayload {
     speed_bytes_per_sec: number;
 }
 
-export function useFileUpload(activeFolderId: number | null, store: Store | null) {
+export function useFileUpload(activeFolderId: number | null, store: Store | null, activeVirtualFolderId: number | null = null) {
     const queryClient = useQueryClient();
     const [uploadQueue, setUploadQueue] = useState<QueueItem[]>([]);
     const [processing, setProcessing] = useState(false);
@@ -72,13 +72,13 @@ export function useFileUpload(activeFolderId: number | null, store: Store | null
         setProcessing(true);
         setUploadQueue(q => q.map(i => i.id === item.id ? { ...i, status: 'uploading', progress: 0 } : i));
         try {
-            await invoke('cmd_upload_file', { path: item.path, folderId: item.folderId, transferId: item.id });
+            await invoke('cmd_upload_file', { path: item.path, folderId: item.folderId, virtualFolderId: item.virtualFolderId ?? null, transferId: item.id });
             // Check if cancelled during upload
             if (cancelledRef.current.has(item.id)) {
                 cancelledRef.current.delete(item.id);
             } else {
                 setUploadQueue(q => q.map(i => i.id === item.id ? { ...i, status: 'success', progress: 100 } : i));
-                queryClient.invalidateQueries({ queryKey: ['files', item.folderId] });
+                queryClient.invalidateQueries({ queryKey: ['files', item.folderId, item.virtualFolderId ?? null] });
             }
         } catch (e) {
             if (!cancelledRef.current.has(item.id)) {
@@ -106,6 +106,7 @@ export function useFileUpload(activeFolderId: number | null, store: Store | null
                     id: Math.random().toString(36).substr(2, 9),
                     path,
                     folderId: activeFolderId,
+                    virtualFolderId: activeVirtualFolderId,
                     status: 'pending'
                 }));
                 setUploadQueue(prev => [...prev, ...newItems]);

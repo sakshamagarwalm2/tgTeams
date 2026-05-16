@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Plus, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { useState, useMemo, useCallback, useRef, useEffect, type ComponentType } from 'react';
+import { Plus, ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Download, FolderPlus, MoveRight, Send, Trash2, Upload, XSquare } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { FileCard } from './FileCard';
 import { EmptyState } from './EmptyState';
@@ -24,8 +24,14 @@ interface FileExplorerProps {
     onDownload: (id: number, name: string) => void;
     onOpen: (file: TelegramFile) => void;
     onManualUpload: () => void;
+    onCreateFolder: () => void;
     onSelectionClear: () => void;
     onToggleSelection: (id: number) => void;
+    onSelectAll: () => void;
+    onShowMoveModal: () => void;
+    onShowShareModal: () => void;
+    onBulkDownload: () => void;
+    onBulkDelete: () => void;
     onDrop?: (e: React.DragEvent, folderId: number) => void;
     onDragStart?: (fileId: number) => void;
     onDragEnd?: () => void;
@@ -60,7 +66,8 @@ function useGridColumns(containerRef: React.RefObject<HTMLDivElement | null>) {
 
 export function FileExplorer({
     files, loading, error, viewMode, selectedIds, activeFolderId,
-    onFileClick, onDelete, onRename, onDownload, onOpen, onManualUpload, onSelectionClear, onToggleSelection, onDrop, onDragStart, onDragEnd
+    onFileClick, onDelete, onRename, onDownload, onOpen, onManualUpload, onCreateFolder, onSelectionClear, onToggleSelection,
+    onSelectAll, onShowMoveModal, onShowShareModal, onBulkDownload, onBulkDelete, onDragStart, onDragEnd
 }: FileExplorerProps) {
     const [sortField, setSortField] = useState<SortField>('name');
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -155,6 +162,51 @@ export function FileExplorer({
             : <ArrowDown className="w-3 h-3 text-telegram-primary" />;
     };
 
+    const allVisibleSelected = sortedFiles.length > 0 && sortedFiles.every(file => selectedIds.includes(file.id));
+
+    const BulkActions = () => (
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2 animate-in fade-in slide-in-from-top-1">
+            <button onClick={onCreateFolder} className="flex items-center gap-1 rounded-md bg-telegram-hover px-3 py-1.5 text-xs text-telegram-text transition hover:bg-telegram-border">
+                <FolderPlus className="h-3.5 w-3.5" />
+                Folder
+            </button>
+            <button onClick={onManualUpload} className="flex items-center gap-1 rounded-md bg-telegram-primary/20 px-3 py-1.5 text-xs font-medium text-telegram-primary transition hover:bg-telegram-primary/30">
+                <Upload className="h-3.5 w-3.5" />
+                Upload
+            </button>
+            {sortedFiles.length > 0 && (
+                <button
+                    onClick={allVisibleSelected ? onSelectionClear : onSelectAll}
+                    className="flex items-center gap-1 rounded-md bg-telegram-hover px-3 py-1.5 text-xs text-telegram-text transition hover:bg-telegram-border"
+                >
+                    {allVisibleSelected ? <XSquare className="h-3.5 w-3.5" /> : <CheckSquare className="h-3.5 w-3.5" />}
+                    {allVisibleSelected ? 'Deselect all' : 'Select all'}
+                </button>
+            )}
+            {selectedIds.length > 0 && (
+                <>
+                    <span className="mr-1 text-xs text-telegram-subtext">{selectedIds.length} selected</span>
+                    <button onClick={onShowShareModal} className="flex items-center gap-1 rounded-md bg-telegram-primary/20 px-3 py-1.5 text-xs font-medium text-telegram-primary transition hover:bg-telegram-primary/30">
+                        <Send className="h-3.5 w-3.5" />
+                        Share
+                    </button>
+                    <button onClick={onShowMoveModal} className="flex items-center gap-1 rounded-md bg-telegram-primary/20 px-3 py-1.5 text-xs font-medium text-telegram-primary transition hover:bg-telegram-primary/30">
+                        <MoveRight className="h-3.5 w-3.5" />
+                        Move
+                    </button>
+                    <button onClick={onBulkDownload} className="flex items-center gap-1 rounded-md bg-telegram-hover px-3 py-1.5 text-xs text-telegram-text transition hover:bg-telegram-border">
+                        <Download className="h-3.5 w-3.5" />
+                        Download
+                    </button>
+                    <button onClick={onBulkDelete} className="flex items-center gap-1 rounded-md bg-red-500/10 px-3 py-1.5 text-xs text-red-400 transition hover:bg-red-500/20">
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                    </button>
+                </>
+            )}
+        </div>
+    );
+
     if (loading) {
         return (
             <div className="flex-1 p-6 flex justify-center items-center text-telegram-subtext flex-col gap-4">
@@ -170,7 +222,17 @@ export function FileExplorer({
 
     if (files.length === 0) {
         return (
-            <div className="flex-1 p-6 overflow-auto">
+            <div
+                ref={parentRef}
+                className="flex-1 p-6 overflow-auto"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (e.target === e.currentTarget) onSelectionClear();
+                }}
+            >
+                <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-telegram-subtext">
+                    <BulkActions />
+                </div>
                 <EmptyState onUpload={onManualUpload} />
             </div>
         );
@@ -181,32 +243,16 @@ export function FileExplorer({
             ref={parentRef}
             className="flex-1 p-6 overflow-auto custom-scrollbar"
             onClick={(e) => {
+                e.stopPropagation();
                 if (e.target === e.currentTarget) onSelectionClear();
             }}
         >
             {viewMode === 'grid' ? (
                 <>
 
-                    <div className="flex items-center gap-2 mb-4 text-xs text-telegram-subtext">
-                        <span>Sort by:</span>
-                        <button
-                            onClick={() => handleSort('name')}
-                            className={`px-2 py-1 rounded flex items-center gap-1 hover:bg-white/5 ${sortField === 'name' ? 'text-telegram-primary' : ''}`}
-                        >
-                            Name <SortIcon field="name" />
-                        </button>
-                        <button
-                            onClick={() => handleSort('size')}
-                            className={`px-2 py-1 rounded flex items-center gap-1 hover:bg-white/5 ${sortField === 'size' ? 'text-telegram-primary' : ''}`}
-                        >
-                            Size <SortIcon field="size" />
-                        </button>
-                        <button
-                            onClick={() => handleSort('date')}
-                            className={`px-2 py-1 rounded flex items-center gap-1 hover:bg-white/5 ${sortField === 'date' ? 'text-telegram-primary' : ''}`}
-                        >
-                            Date <SortIcon field="date" />
-                        </button>
+                    <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-telegram-subtext">
+                        <SortControls sortField={sortField} handleSort={handleSort} SortIcon={SortIcon} />
+                        <BulkActions />
                     </div>
 
 
@@ -247,12 +293,19 @@ export function FileExplorer({
                                                 key={file.id}
                                                 file={file}
                                                 isSelected={selectedIds.includes(file.id)}
-                                                onClick={(e) => onFileClick(e, file.id)}
+                                                onClick={(e) => {
+                                                    if (file.type === 'folder') {
+                                                        e.stopPropagation();
+                                                        handleOpenRequest(file);
+                                                    } else {
+                                                        onFileClick(e, file.id);
+                                                    }
+                                                }}
                                                 onContextMenu={(e) => handleContextMenu(e, file)}
                                                 onDelete={() => onDelete(file.id)}
                                                 onDownload={() => onDownload(file.id, file.name)}
                                                 onOpen={() => handleOpenRequest(file)}
-                                                onDrop={onDrop}
+                                                onDrop={undefined}
                                                 onDragStart={onDragStart}
                                                 onDragEnd={onDragEnd}
                                                 activeFolderId={activeFolderId}
@@ -268,18 +321,9 @@ export function FileExplorer({
                 </>
             ) : (
                 <div className="flex flex-col w-full">
-                    {/* List Header */}
-                    <div className="grid grid-cols-[2rem_2fr_6rem_8rem] gap-4 px-4 py-2 text-xs font-semibold text-telegram-subtext border-b border-telegram-border mb-2 select-none items-center">
-                        <div className="text-center">#</div>
-                        <button onClick={() => handleSort('name')} className="flex items-center gap-1 hover:text-telegram-text transition-colors">
-                            Name <SortIcon field="name" />
-                        </button>
-                        <button onClick={() => handleSort('size')} className="flex items-center gap-1 justify-end hover:text-telegram-text transition-colors">
-                            Size <SortIcon field="size" />
-                        </button>
-                        <button onClick={() => handleSort('date')} className="flex items-center gap-1 justify-end hover:text-telegram-text transition-colors">
-                            Date <SortIcon field="date" />
-                        </button>
+                    <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-telegram-border px-4 pb-2 text-xs font-semibold text-telegram-subtext">
+                        <SortControls sortField={sortField} handleSort={handleSort} SortIcon={SortIcon} />
+                        <BulkActions />
                     </div>
 
 
@@ -316,11 +360,18 @@ export function FileExplorer({
                                     <FileListItem
                                         file={file}
                                         selectedIds={selectedIds}
-                                        onFileClick={onFileClick}
+                                        onFileClick={(e, id) => {
+                                            if (file.type === 'folder') {
+                                                e.stopPropagation();
+                                                handleOpenRequest(file);
+                                            } else {
+                                                onFileClick(e, id);
+                                            }
+                                        }}
                                         handleContextMenu={handleContextMenu}
                                         onDragStart={onDragStart}
                                         onDragEnd={onDragEnd}
-                                        onDrop={onDrop}
+                                        onDrop={undefined}
                                         onOpen={handleOpenRequest}
                                         onDownload={onDownload}
                                         onDelete={onDelete}
@@ -371,4 +422,29 @@ export function FileExplorer({
             )}
         </div>
     )
+}
+
+function SortControls({
+    sortField,
+    handleSort,
+    SortIcon,
+}: {
+    sortField: SortField;
+    handleSort: (field: SortField) => void;
+    SortIcon: ComponentType<{ field: SortField }>;
+}) {
+    return (
+        <>
+            <span>Sort by:</span>
+            {(['name', 'size', 'date'] as SortField[]).map(field => (
+                <button
+                    key={field}
+                    onClick={() => handleSort(field)}
+                    className={`flex items-center gap-1 rounded px-2 py-1 capitalize transition-colors hover:bg-white/5 ${sortField === field ? 'text-telegram-primary' : ''}`}
+                >
+                    {field} <SortIcon field={field} />
+                </button>
+            ))}
+        </>
+    );
 }

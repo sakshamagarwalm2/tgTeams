@@ -19,6 +19,7 @@ import { AddSubscriberModal } from './dashboard/AddSubscriberModal';
 import { UploadQueue } from './dashboard/UploadQueue';
 import { DownloadQueue } from './dashboard/DownloadQueue';
 import { MoveToFolderModal } from './dashboard/MoveToFolderModal';
+import { ShareFilesModal } from './dashboard/ShareFilesModal';
 import { DragDropOverlay } from './dashboard/DragDropOverlay';
 import { ExternalDropBlocker } from './dashboard/ExternalDropBlocker';
 
@@ -39,13 +40,17 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
+    const [activeVirtualFolderId, setActiveVirtualFolderId] = useState<number | null>(null);
+    const [virtualFolderStack, setVirtualFolderStack] = useState<TelegramFile[]>([]);
     const [showMoveModal, setShowMoveModal] = useState(false);
+    const [showShareModal, setShowShareModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [searchResults, setSearchResults] = useState<TelegramFile[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [internalDragFileId, _setInternalDragFileId] = useState<number | null>(null);
     const [activeCompanyManagement, setActiveCompanyManagement] = useState(false);
     const [activeGroupId, setActiveGroupId] = useState<number | null>(null);
+    const [activeDirectChat, setActiveDirectChat] = useState<any | null>(null);
     const [groups, setGroups] = useState<{id: number, name: string, username: string | null, member_count: number}[]>([]);
     const [activeMembers, setActiveMembers] = useState<any[]>([]);
     const [showAddSubscriber, setShowAddSubscriber] = useState(false);
@@ -106,8 +111,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     }, [store, viewMode]);
 
     const { data: allFiles = [], isLoading, error } = useQuery({
-        queryKey: ['files', activeFolderId],
-        queryFn: () => invoke<any[]>('cmd_get_files', { folderId: activeFolderId }).then(res => res.map(f => ({
+        queryKey: ['files', activeFolderId, activeVirtualFolderId],
+        queryFn: () => invoke<any[]>('cmd_get_files', { folderId: activeFolderId, virtualFolderId: activeVirtualFolderId }).then(res => res.map(f => ({
             ...f,
             sizeStr: formatBytes(f.size),
             type: f.icon_type || (f.name.endsWith('/') ? 'folder' : 'file')
@@ -129,14 +134,32 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     const {
         handleDelete, handleRename, handleBulkDelete, handleBulkDownload,
         handleBulkMove, handleDownloadFolder, handleGlobalSearch
-    } = useFileOperations(activeFolderId, selectedIds, setSelectedIds, displayedFiles);
+    } = useFileOperations(activeFolderId, activeVirtualFolderId, selectedIds, setSelectedIds, displayedFiles);
 
-    const { uploadQueue, setUploadQueue, handleManualUpload, cancelAll: cancelUploads, cancelItem: cancelUploadItem, retryItem: retryUploadItem, isDragging } = useFileUpload(activeFolderId, store);
+    const { uploadQueue, setUploadQueue, handleManualUpload, cancelAll: cancelUploads, cancelItem: cancelUploadItem, retryItem: retryUploadItem, isDragging } = useFileUpload(activeFolderId, store, activeVirtualFolderId);
     const { downloadQueue, queueDownload, clearFinished: clearDownloads, cancelAll: cancelDownloads, cancelItem: cancelDownloadItem, retryItem: retryDownloadItem, openWithSystemApp } = useFileDownload(store);
 
     const handleSelectAll = useCallback(() => {
-        setSelectedIds(displayedFiles.map(f => f.id));
-    }, [displayedFiles]);
+        const visibleIds = displayedFiles.map(f => f.id);
+        const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
+        setSelectedIds(allVisibleSelected ? [] : visibleIds);
+    }, [displayedFiles, selectedIds]);
+
+    const handleShareFiles = useCallback(async (targetFolderId: number | null) => {
+        if (selectedIds.length === 0) return;
+        try {
+            await invoke('cmd_share_files', {
+                messageIds: selectedIds,
+                sourceFolderId: activeFolderId,
+                targetFolderId,
+            });
+            toast.success(`Shared ${selectedIds.length} file(s).`);
+            setSelectedIds([]);
+        } catch (e) {
+            toast.error(`Share failed: ${e}`);
+            throw e;
+        }
+    }, [selectedIds, activeFolderId]);
 
     const handleKeyboardDelete = useCallback(() => {
         if (selectedIds.length > 0) {
@@ -172,14 +195,17 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
         onEscape: handleEscape,
         onSearch: handleFocusSearch,
         onEnter: handleEnter,
-        enabled: !showMoveModal
+        enabled: !showMoveModal && !showShareModal
     });
 
     useEffect(() => {
         setSelectedIds([]);
         setShowMoveModal(false);
+        setShowShareModal(false);
         setSearchTerm("");
         setSearchResults([]);
+        setActiveVirtualFolderId(null);
+        setVirtualFolderStack([]);
     }, [activeFolderId]);
 
     useEffect(() => {
@@ -212,9 +238,41 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     }, []);
 
     const handleOpenFile = (file: TelegramFile) => {
-        if (file.type !== 'folder') {
+        if (file.type === 'folder') {
+            setActiveVirtualFolderId(file.id);
+            setVirtualFolderStack(stack => [...stack, file]);
+            setSelectedIds([]);
+        } else {
             openWithSystemApp(file.id, file.name, activeFolderId);
         }
+    };
+
+    const handleCreateVirtualFolder = async () => {
+        const name = prompt('Folder name:');
+        if (!name?.trim()) return;
+        try {
+            await invoke('cmd_create_virtual_folder', {
+                folderId: activeFolderId,
+                parentVirtualFolderId: activeVirtualFolderId,
+                name: name.trim(),
+            });
+            queryClient.invalidateQueries({ queryKey: ['files', activeFolderId, activeVirtualFolderId] });
+            toast.success('Folder created');
+        } catch (e) {
+            toast.error(`Failed to create folder: ${e}`);
+        }
+    };
+
+    const handleVirtualBreadcrumb = (index: number) => {
+        if (index < 0) {
+            setActiveVirtualFolderId(null);
+            setVirtualFolderStack([]);
+        } else {
+            const nextStack = virtualFolderStack.slice(0, index + 1);
+            setVirtualFolderStack(nextStack);
+            setActiveVirtualFolderId(nextStack[nextStack.length - 1]?.id ?? null);
+        }
+        setSelectedIds([]);
     };
 
     const handleDropOnFolder = async (e: React.DragEvent, targetFolderId: number | null) => {
@@ -253,6 +311,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     const currentFolderName = activeFolderId === null
         ? "Saved Messages"
         : folders.find(f => f.id === activeFolderId)?.name || "Folder";
+    const currentDrivePath = [currentFolderName, ...virtualFolderStack.map(folder => folder.name)].join(' / ');
 
     const canManageActiveGroup = activeGroupId !== null && activeMembers.some(member => (
         String(member.user_id) === currentUserId && (member.is_admin || member.is_owner)
@@ -293,6 +352,15 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                         key="move-modal"
                     />
                 )}
+                {showShareModal && (
+                    <ShareFilesModal
+                        folders={folders}
+                        selectedCount={selectedIds.length}
+                        onClose={() => setShowShareModal(false)}
+                        onShare={handleShareFiles}
+                        key="share-files-modal"
+                    />
+                )}
                 {isDragging && internalDragFileId === null && <DragDropOverlay key="drag-drop-overlay" />}
             </AnimatePresence>
 
@@ -302,6 +370,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                 setActiveFolderId={setActiveFolderId}
                 activeGroupId={activeGroupId}
                 setActiveGroupId={setActiveGroupId}
+                activeDirectChatId={activeDirectChat?.user_id || null}
+                setActiveDirectChat={setActiveDirectChat}
                 activeCompanyManagement={activeCompanyManagement}
                 setActiveCompanyManagement={setActiveCompanyManagement}
                 onDrop={handleDropOnFolder}
@@ -324,6 +394,14 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                             isDirect
                         />
                     </div>
+                ) : activeDirectChat ? (
+                    <div className="flex-1 flex flex-col min-h-0 relative">
+                        <TeamChat
+                            groupId={Number(activeDirectChat.user_id)}
+                            groupName={`${activeDirectChat.first_name} ${activeDirectChat.last_name || ''}`.trim()}
+                            isDirect
+                        />
+                    </div>
                 ) : activeGroupId !== null ? (
                     <div className="flex-1 flex flex-col min-h-0 relative">
                         <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
@@ -343,17 +421,14 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                             groupName={groups.find(g => g.id === activeGroupId)?.name || 'Group Chat'}
                             memberCount={groups.find(g => g.id === activeGroupId)?.member_count || activeMembers.length}
                             canManageMembers={canManageActiveGroup}
+                            mentionableMembers={activeMembers}
                             onManageMembers={() => setShowAddSubscriber(true)}
                         />
                     </div>
                 ) : (
                     <>
                         <TopBar
-                            currentFolderName={currentFolderName}
-                            selectedIds={selectedIds}
-                            onShowMoveModal={() => setShowMoveModal(true)}
-                            onBulkDownload={handleBulkDownload}
-                            onBulkDelete={handleBulkDelete}
+                            currentFolderName={currentDrivePath}
                             onDownloadFolder={handleDownloadFolder}
                             viewMode={viewMode}
                             setViewMode={setViewMode}
@@ -369,6 +444,25 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                                 </h2>
                             </div>
                         )}
+                        <div className="flex flex-wrap items-center gap-2 px-6 pt-4 text-xs text-telegram-subtext">
+                            <button
+                                onClick={() => handleVirtualBreadcrumb(-1)}
+                                className={`rounded px-2 py-1 transition-colors hover:bg-telegram-hover hover:text-telegram-text ${activeVirtualFolderId === null ? 'text-telegram-primary' : ''}`}
+                            >
+                                {currentFolderName}
+                            </button>
+                            {virtualFolderStack.map((folder, index) => (
+                                <span key={folder.id} className="flex items-center gap-2">
+                                    <span>/</span>
+                                    <button
+                                        onClick={() => handleVirtualBreadcrumb(index)}
+                                        className={`rounded px-2 py-1 transition-colors hover:bg-telegram-hover hover:text-telegram-text ${index === virtualFolderStack.length - 1 ? 'text-telegram-primary' : ''}`}
+                                    >
+                                        {folder.name}
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
                         <FileExplorer
                             files={displayedFiles}
                             loading={isLoading || isSearching}
@@ -382,8 +476,14 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                             onDownload={(id, name) => queueDownload(id, name, activeFolderId)}
                             onOpen={handleOpenFile}
                             onManualUpload={handleManualUpload}
+                            onCreateFolder={handleCreateVirtualFolder}
                             onSelectionClear={() => setSelectedIds([])}
                             onToggleSelection={handleToggleSelection}
+                            onSelectAll={handleSelectAll}
+                            onShowMoveModal={() => setShowMoveModal(true)}
+                            onShowShareModal={() => setShowShareModal(true)}
+                            onBulkDownload={handleBulkDownload}
+                            onBulkDelete={handleBulkDelete}
                             onDrop={handleDropOnFolder}
                             onDragStart={(fileId) => setInternalDragFileId(fileId)}
                             onDragEnd={() => setTimeout(() => setInternalDragFileId(null), 50)}

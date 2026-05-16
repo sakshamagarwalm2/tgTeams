@@ -33,6 +33,7 @@ interface TeamMember {
     is_owner: boolean;
     role: string;
     access_hash?: string | null;
+    unread_count?: number;
 }
 
 interface CurrentTelegramUser {
@@ -116,7 +117,7 @@ export function TeamsPanel({ onGroupCreated }: TeamsPanelProps) {
             setLoading(true);
             const [teamResult, contactResult, userResult, token] = await Promise.all([
                 invoke<TeamInfo[]>('cmd_get_teams'),
-                invoke<TeamMember[]>('cmd_get_contacts'),
+                invoke<TeamMember[]>('cmd_get_direct_chats'),
                 invoke<CurrentTelegramUser | null>('cmd_get_current_user'),
                 invoke<string>('cmd_get_stream_token'),
             ]);
@@ -339,6 +340,7 @@ export function TeamsPanel({ onGroupCreated }: TeamsPanelProps) {
                             memberCount={selectedTeam?.member_count || members.length}
                             canManageMembers={canManageMembers}
                             isDirect={selectedChat.type === 'direct'}
+                            mentionableMembers={members}
                             onManageMembers={() => setShowAddMemberModal(true)}
                         />
                         {selectedTeam && showMembersPanel && (

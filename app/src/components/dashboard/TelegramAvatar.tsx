@@ -10,6 +10,7 @@ export interface AvatarUser {
 interface TelegramAvatarProps {
     user: AvatarUser;
     token?: string;
+    baseUrl?: string;
     size?: 'sm' | 'md' | 'lg';
     className?: string;
 }
@@ -41,12 +42,12 @@ function getBgColor(id: string | number) {
     return colors[numId % colors.length];
 }
 
-export function TelegramAvatar({ user, token, size = 'md', className = '' }: TelegramAvatarProps) {
+export function TelegramAvatar({ user, token, baseUrl = 'http://localhost:14201', size = 'md', className = '' }: TelegramAvatarProps) {
     const [imageLoaded, setImageLoaded] = useState(false);
     const [imageFailed, setImageFailed] = useState(false);
     const userId = String(user.user_id);
     const avatarUrl = token && !imageFailed
-        ? `http://127.0.0.1:1421/avatar/${userId}?token=${token}`
+        ? `${baseUrl}/avatar/${userId}?token=${token}`
         : null;
 
     useEffect(() => {

@@ -4,10 +4,6 @@ import { MemberStack } from './MemberStack';
 
 interface TopBarProps {
     currentFolderName: string;
-    selectedIds: number[];
-    onShowMoveModal: () => void;
-    onBulkDownload: () => void;
-    onBulkDelete: () => void;
     onDownloadFolder: () => void;
     viewMode: 'grid' | 'list';
     setViewMode: (mode: 'grid' | 'list') => void;
@@ -18,7 +14,7 @@ interface TopBarProps {
 }
 
 export function TopBar({
-    currentFolderName, selectedIds, onShowMoveModal, onBulkDownload, onBulkDelete,
+    currentFolderName,
     onDownloadFolder, viewMode, setViewMode, searchTerm, onSearchChange, members = [],
     onAddSubscriber
 }: TopBarProps) {
@@ -61,15 +57,6 @@ export function TopBar({
             </div>
 
             <div className="flex items-center gap-2">
-                {selectedIds.length > 0 && (
-                    <div className="flex items-center gap-2 mr-4 animate-in fade-in slide-in-from-top-2">
-                        <span className="text-xs text-telegram-subtext mr-2">{selectedIds.length} Selected</span>
-                        <button onClick={onShowMoveModal} className="px-3 py-1.5 bg-telegram-primary/20 hover:bg-telegram-primary/30 text-telegram-primary rounded-md text-xs transition font-medium">Move to...</button>
-                        <button onClick={onBulkDownload} className="px-3 py-1.5 bg-telegram-hover hover:bg-telegram-border rounded-md text-xs text-telegram-text transition">Download Selected</button>
-                        <button onClick={onBulkDelete} className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-md text-xs transition">Delete</button>
-                    </div>
-                )}
-
                 <button onClick={onDownloadFolder} className="p-2 hover:bg-telegram-hover rounded-md text-telegram-subtext hover:text-telegram-text transition group relative" title="Download Folder">
                     <HardDrive className="w-5 h-5" />
                     <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-[10px] bg-telegram-surface border border-telegram-border px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-lg">

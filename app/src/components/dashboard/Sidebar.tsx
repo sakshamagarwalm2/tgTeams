@@ -5,8 +5,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { SidebarItem } from './SidebarItem';
 import { BandwidthWidget } from './BandwidthWidget';
 import { MemberStack } from './MemberStack';
+import { TelegramAvatar } from './TelegramAvatar';
 import { TeamVisibilityModal } from './TeamVisibilityModal';
 import {
+    isContactVisible,
     isTeamVisible,
     readTeamVisibility,
     TEAM_VISIBILITY_CHANGED_EVENT,
@@ -20,6 +22,7 @@ interface GroupInfo {
     username: string | null;
     member_count: number;
     top_members?: any[];
+    unread_count?: number;
 }
 
 interface ContactInfo {
@@ -28,6 +31,7 @@ interface ContactInfo {
     last_name?: string | null;
     username?: string | null;
     phone?: string | null;
+    unread_count?: number;
 }
 
 interface SidebarProps {
@@ -36,6 +40,8 @@ interface SidebarProps {
     setActiveFolderId: (id: number | null) => void;
     activeGroupId: number | null;
     setActiveGroupId: (id: number | null) => void;
+    activeDirectChatId: string | null;
+    setActiveDirectChat: (contact: ContactInfo | null) => void;
     activeCompanyManagement: boolean;
     setActiveCompanyManagement: (active: boolean) => void;
     onDrop: (e: React.DragEvent, folderId: number | null) => void;
@@ -50,13 +56,14 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-    folders, activeFolderId, setActiveFolderId, activeGroupId, setActiveGroupId, activeCompanyManagement, setActiveCompanyManagement, onDrop, onDelete, onRename, onCreate,
+    folders, activeFolderId, setActiveFolderId, activeGroupId, setActiveGroupId, activeDirectChatId, setActiveDirectChat, activeCompanyManagement, setActiveCompanyManagement, onDrop, onDelete, onRename, onCreate,
     isSyncing, isConnected, onSync, onLogout, bandwidth
 }: SidebarProps) {
     const [showNewFolderInput, setShowNewFolderInput] = useState(false);
     const [newFolderName, setNewFolderName] = useState("");
     const [driveExpanded, setDriveExpanded] = useState(true);
     const [teamsExpanded, setTeamsExpanded] = useState(true);
+    const [directExpanded, setDirectExpanded] = useState(true);
     const [showVisibilitySettings, setShowVisibilitySettings] = useState(false);
     const [groups, setGroups] = useState<GroupInfo[]>([]);
     const [contacts, setContacts] = useState<ContactInfo[]>([]);
@@ -65,7 +72,7 @@ export function Sidebar({
 
     useEffect(() => {
         loadGroups();
-        loadContacts();
+        loadDirectChats();
         invoke<string>('cmd_get_stream_token').then(setStreamToken).catch(console.error);
     }, []);
 
@@ -88,12 +95,12 @@ export function Sidebar({
         }
     };
 
-    const loadContacts = async () => {
+    const loadDirectChats = async () => {
         try {
-            const result = await invoke<ContactInfo[]>('cmd_get_contacts');
+            const result = await invoke<ContactInfo[]>('cmd_get_direct_chats');
             setContacts(result);
         } catch (e) {
-            console.error('Failed to load contacts:', e);
+            console.error('Failed to load direct chats:', e);
         }
     };
 
@@ -120,6 +127,7 @@ export function Sidebar({
     };
 
     const visibleGroups = groups.filter(group => isTeamVisible(group.id, teamVisibility));
+    const visibleContacts = contacts.filter(contact => isContactVisible(contact.user_id, teamVisibility));
 
     return (
         <aside className="w-64 bg-telegram-surface border-r border-telegram-border flex flex-col" onClick={e => e.stopPropagation()}>
@@ -138,6 +146,7 @@ export function Sidebar({
                             setActiveCompanyManagement(true);
                             setActiveFolderId(null);
                             setActiveGroupId(null);
+                            setActiveDirectChat(null);
                         }}
                         onDrop={(e: React.DragEvent) => onDrop(e, null)}
                         folderId={null}
@@ -173,6 +182,7 @@ export function Sidebar({
                                         setActiveCompanyManagement(false);
                                         setActiveFolderId(null);
                                         setActiveGroupId(null);
+                                        setActiveDirectChat(null);
                                     }}
                                     onDrop={(e: React.DragEvent) => onDrop(e, null)}
                                     folderId={null}
@@ -187,6 +197,7 @@ export function Sidebar({
                                             setActiveCompanyManagement(false);
                                             setActiveFolderId(folder.id);
                                             setActiveGroupId(null);
+                                            setActiveDirectChat(null);
                                         }}
                                         onDrop={(e: React.DragEvent) => onDrop(e, folder.id)}
                                         onDelete={() => onDelete(folder.id, folder.name)}
@@ -262,6 +273,7 @@ export function Sidebar({
                                         onClick={() => {
                                             setActiveCompanyManagement(false);
                                             setActiveGroupId(group.id);
+                                            setActiveDirectChat(null);
                                             setActiveFolderId(null);
                                         }}
                                         className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
@@ -275,6 +287,9 @@ export function Sidebar({
                                             <p className="truncate">{group.name}</p>
                                         </div>
                                         <div className="flex items-center gap-1">
+                                            {Boolean(group.unread_count) && (
+                                                <span className="h-2 w-2 rounded-full bg-telegram-primary" title={`${group.unread_count} unread`} />
+                                            )}
                                             {group.top_members && group.top_members.length > 0 && (
                                                 <MemberStack members={group.top_members} size="sm" maxDisplay={2} />
                                             )}
@@ -290,6 +305,40 @@ export function Sidebar({
                                         <Plus className="w-3 h-3" />
                                         New
                                     </button>
+                                </div>
+
+                                <div className="pt-3">
+                                    <button
+                                        onClick={() => setDirectExpanded(!directExpanded)}
+                                        className="mb-1 flex w-full items-center justify-between px-3 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-telegram-subtext hover:text-telegram-text"
+                                    >
+                                        <span>One on One</span>
+                                        {directExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                    </button>
+                                    {directExpanded && visibleContacts.slice(0, 20).map(contact => (
+                                        <button
+                                            key={contact.user_id}
+                                            onClick={() => {
+                                                setActiveCompanyManagement(false);
+                                                setActiveGroupId(null);
+                                                setActiveFolderId(null);
+                                                setActiveDirectChat(contact);
+                                            }}
+                                            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs font-medium transition-all ${
+                                                activeDirectChatId === contact.user_id
+                                                    ? 'bg-telegram-primary/10 text-telegram-primary border border-telegram-primary/20'
+                                                    : 'text-telegram-text hover:bg-telegram-hover'
+                                            }`}
+                                        >
+                                            <TelegramAvatar user={contact} token={streamToken} size="sm" />
+                                            <span className="min-w-0 flex-1 truncate text-left">
+                                                {contact.first_name} {contact.last_name || ''}
+                                            </span>
+                                            {Boolean(contact.unread_count) && (
+                                                <span className="h-2 w-2 rounded-full bg-telegram-primary" title={`${contact.unread_count} unread`} />
+                                            )}
+                                        </button>
+                                    ))}
                                 </div>
                             </motion.div>
                         )}

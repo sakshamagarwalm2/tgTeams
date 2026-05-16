@@ -6,6 +6,7 @@ import { TelegramFile } from '../types';
 
 export function useFileOperations(
     activeFolderId: number | null,
+    activeVirtualFolderId: number | null,
     selectedIds: number[],
     setSelectedIds: (ids: number[]) => void,
     displayedFiles: TelegramFile[]
@@ -17,7 +18,7 @@ export function useFileOperations(
         if (!await confirm({ title: "Delete File", message: "Are you sure you want to delete this file?", confirmText: "Delete", variant: 'danger' })) return;
         try {
             await invoke('cmd_delete_file', { messageId: id, folderId: activeFolderId });
-            queryClient.invalidateQueries({ queryKey: ['files', activeFolderId] });
+            queryClient.invalidateQueries({ queryKey: ['files', activeFolderId, activeVirtualFolderId] });
             toast.success("File deleted");
         } catch (e) {
             toast.error(`Delete failed: ${e}`);
@@ -27,7 +28,7 @@ export function useFileOperations(
     const handleRename = async (id: number, newName: string) => {
         try {
             await invoke('cmd_rename_file', { messageId: id, folderId: activeFolderId, newName });
-            queryClient.invalidateQueries({ queryKey: ['files', activeFolderId] });
+            queryClient.invalidateQueries({ queryKey: ['files', activeFolderId, activeVirtualFolderId] });
             toast.success("File renamed");
         } catch (e) {
             toast.error(`Rename failed: ${e}`);
@@ -49,7 +50,7 @@ export function useFileOperations(
             }
         }
         setSelectedIds([]);
-        queryClient.invalidateQueries({ queryKey: ['files', activeFolderId] });
+        queryClient.invalidateQueries({ queryKey: ['files', activeFolderId, activeVirtualFolderId] });
         if (success > 0) toast.success(`Deleted ${success} files.`);
         if (fail > 0) toast.error(`Failed to delete ${fail} files.`);
     }
@@ -102,7 +103,7 @@ export function useFileOperations(
                 targetFolderId: targetFolderId
             });
             toast.success(`Moved ${selectedIds.length} files.`);
-            queryClient.invalidateQueries({ queryKey: ['files', activeFolderId] });
+            queryClient.invalidateQueries({ queryKey: ['files', activeFolderId, activeVirtualFolderId] });
             setSelectedIds([]);
             if (onSuccess) onSuccess();
         } catch {

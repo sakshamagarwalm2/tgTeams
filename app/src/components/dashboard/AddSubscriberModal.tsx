@@ -15,6 +15,8 @@ interface TeamMember {
     is_admin?: boolean;
     role?: string;
     access_hash?: string; // Added to help with invitations
+    invite_eligible?: boolean;
+    invite_restriction?: string | null;
 }
 
 interface AddSubscriberModalProps {
@@ -33,6 +35,7 @@ export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, o
     const [membersLoading, setMembersLoading] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [isAdding, setIsAdding] = useState<string | null>(null);
+    const [isSendingInvite, setIsSendingInvite] = useState<string | null>(null);
     const [isRemoving, setIsRemoving] = useState<string | null>(null);
     const [streamToken, setStreamToken] = useState<string>('');
 
@@ -62,8 +65,11 @@ export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, o
 
     const loadContacts = async () => {
         try {
-            const res = await invoke<TeamMember[]>('cmd_get_contacts');
-            setContacts(res);
+            const [directChats, telegramContacts] = await Promise.all([
+                invoke<TeamMember[]>('cmd_get_direct_chats'),
+                invoke<TeamMember[]>('cmd_get_contacts').catch(() => [] as TeamMember[]),
+            ]);
+            setContacts(mergePeople(directChats, telegramContacts));
         } catch (e) {
             console.error('Failed to load contacts:', e);
         }
@@ -91,6 +97,10 @@ export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, o
 
     const handleAdd = async (member: TeamMember) => {
         if (isExistingMember(member.user_id)) return;
+        if (member.invite_eligible === false) {
+            await handleSendInviteLink(member);
+            return;
+        }
         setIsAdding(member.user_id);
         try {
             await invoke('cmd_add_team_member', { 
@@ -105,6 +115,22 @@ export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, o
             toast.error(`Failed to add: ${e}`);
         } finally {
             setIsAdding(null);
+        }
+    };
+
+    const handleSendInviteLink = async (member: TeamMember) => {
+        setIsSendingInvite(member.user_id);
+        try {
+            await invoke('cmd_send_team_invite_link', {
+                teamId,
+                userIdStr: member.user_id,
+                accessHashStr: member.access_hash,
+            });
+            toast.success(`Invite link sent to ${member.first_name}`);
+        } catch (e) {
+            toast.error(`Failed to send invite link: ${e}`);
+        } finally {
+            setIsSendingInvite(null);
         }
     };
 
@@ -131,7 +157,7 @@ export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, o
         return haystack.includes(searchTerm.toLowerCase());
     });
 
-    const displayContacts = searchTerm.length >= 2 ? results : contacts;
+    const displayContacts = searchTerm.length >= 2 ? mergePeople(results, contacts) : contacts;
 
     return (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4" onClick={onClose}>
@@ -160,8 +186,8 @@ export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, o
                                 onClick={() => setActiveTab('contacts')}
                                 className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'contacts' ? 'bg-telegram-surface text-telegram-text shadow-sm' : 'text-telegram-subtext hover:text-telegram-text'}`}
                             >
-                                <Contact className="w-4 h-4" />
-                                Contacts
+                            <Contact className="w-4 h-4" />
+                            People
                             </button>
                         ) : (
                             <button
@@ -169,7 +195,7 @@ export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, o
                                 disabled
                             >
                                 <Contact className="w-4 h-4" />
-                                Contacts
+                                People
                             </button>
                         )}
                     </div>
@@ -179,7 +205,7 @@ export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, o
                         <input
                             autoFocus
                             type="text"
-                            placeholder={activeTab === 'members' ? 'Search current members...' : 'Search contacts or @username...'}
+                            placeholder={activeTab === 'members' ? 'Search current members...' : 'Search people or @username...'}
                             className="w-full bg-telegram-hover border border-telegram-border rounded-xl pl-10 pr-4 py-2 text-sm text-telegram-text focus:outline-none focus:border-telegram-primary/50 transition-colors"
                             value={searchTerm}
                             onChange={(e) => handleSearch(e.target.value)}
@@ -229,6 +255,7 @@ export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, o
                         ) : canManageMembers && displayContacts.length > 0 ? (
                             displayContacts.map(member => {
                                 const alreadyAdded = isExistingMember(member.user_id);
+                                const inviteBlocked = member.invite_eligible === false;
                                 return (
                                 <div key={member.user_id} className="flex items-center gap-3 p-2 hover:bg-telegram-hover rounded-xl transition-colors group">
                                     <TelegramAvatar user={member} token={streamToken} size="lg" />
@@ -237,16 +264,16 @@ export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, o
                                             {member.first_name} {member.last_name || ''}
                                         </p>
                                         <p className="text-xs text-telegram-subtext truncate">
-                                            {member.username ? `@${member.username}` : member.phone || 'No username'}
+                                            {inviteBlocked ? 'Invite link required' : member.username ? `@${member.username}` : member.phone || 'No username'}
                                         </p>
                                     </div>
                                     <button
                                         onClick={() => handleAdd(member)}
-                                        disabled={isAdding !== null || alreadyAdded}
-                                        className="p-2 bg-telegram-primary/10 hover:bg-telegram-primary text-telegram-primary hover:text-white rounded-lg transition-all disabled:opacity-50"
-                                        title={alreadyAdded ? 'Already a member' : 'Add member'}
+                                        disabled={isAdding !== null || isSendingInvite !== null || alreadyAdded}
+                                        className="p-2 bg-telegram-primary/10 hover:bg-telegram-primary text-telegram-primary hover:text-white rounded-lg transition-all disabled:cursor-not-allowed disabled:opacity-40"
+                                        title={alreadyAdded ? 'Already a member' : inviteBlocked ? 'Send invite link' : 'Add member'}
                                     >
-                                        {isAdding === member.user_id ? (
+                                        {isAdding === member.user_id || isSendingInvite === member.user_id ? (
                                             <Loader2 className="w-4 h-4 animate-spin" />
                                         ) : (
                                             <UserPlus className="w-4 h-4" />
@@ -257,7 +284,7 @@ export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, o
                         ) : (
                             <div className="py-8 text-center">
                                 <p className="text-sm text-telegram-subtext">
-                                    {searchTerm.length >= 2 ? 'No results found' : 'No Telegram contacts found'}
+                                    {searchTerm.length >= 2 ? 'No results found' : 'No people found'}
                                 </p>
                             </div>
                         )}
@@ -266,10 +293,32 @@ export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, o
 
                 <div className="p-4 bg-telegram-hover/50 text-center">
                     <p className="text-[10px] text-telegram-subtext uppercase tracking-wider font-bold">
-                        Search contacts by name, phone, or @username
+                        Search people by name, phone, or @username
                     </p>
                 </div>
             </div>
         </div>
     );
+}
+
+function mergePeople(primary: TeamMember[], secondary: TeamMember[]) {
+    const peopleById = new Map<string, TeamMember>();
+    [...primary, ...secondary].forEach(person => {
+        const key = String(person.user_id);
+        const existing = peopleById.get(key);
+        peopleById.set(key, {
+            ...person,
+            ...existing,
+            access_hash: existing?.access_hash || person.access_hash,
+            username: existing?.username || person.username,
+            phone: existing?.phone || person.phone,
+            invite_eligible: existing?.invite_eligible === true || person.invite_eligible === true
+                ? true
+                : existing?.invite_eligible ?? person.invite_eligible,
+            invite_restriction: existing?.invite_eligible === true || person.invite_eligible === true
+                ? null
+                : existing?.invite_restriction || person.invite_restriction,
+        });
+    });
+    return Array.from(peopleById.values());
 }

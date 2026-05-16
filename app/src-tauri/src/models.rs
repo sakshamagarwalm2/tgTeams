@@ -20,6 +20,8 @@ pub struct AuthResult {
 pub struct FileMetadata {
     pub id: i64,
     pub folder_id: Option<i64>,
+    pub virtual_folder_id: Option<i64>,
+    pub parent_virtual_folder_id: Option<i64>,
     pub name: String,
     pub size: u64, // Updated to u64
     pub mime_type: Option<String>,

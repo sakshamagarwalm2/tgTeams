@@ -13,6 +13,7 @@ pub struct TeamInfo {
     pub is_channel: bool,
     pub is_supergroup: bool,
     pub top_members: Vec<TeamMember>,
+    pub unread_count: i32,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -27,6 +28,23 @@ pub struct TeamMember {
     pub is_owner: bool,
     pub role: String,
     pub photo_url: Option<String>,
+    pub invite_eligible: bool,
+    pub invite_restriction: Option<String>,
+    #[serde(serialize_with = "serialize_opt_i64_to_string")]
+    pub access_hash: Option<i64>,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct DirectChatInfo {
+    #[serde(serialize_with = "serialize_i64_to_string")]
+    pub user_id: i64,
+    pub first_name: String,
+    pub last_name: Option<String>,
+    pub username: Option<String>,
+    pub phone: Option<String>,
+    pub unread_count: i32,
+    pub invite_eligible: bool,
+    pub invite_restriction: Option<String>,
     #[serde(serialize_with = "serialize_opt_i64_to_string")]
     pub access_hash: Option<i64>,
 }
@@ -38,6 +56,47 @@ pub struct CurrentTelegramUser {
     pub first_name: String,
     pub last_name: Option<String>,
     pub username: Option<String>,
+}
+
+fn peer_to_input_peer(peer: &Peer) -> Result<tl::enums::InputPeer, String> {
+    match peer {
+        Peer::Channel(c) => Ok(tl::enums::InputPeer::Channel(tl::types::InputPeerChannel {
+            channel_id: c.raw.id,
+            access_hash: c.raw.access_hash.ok_or("No access hash for channel")?,
+        })),
+        Peer::User(u) => {
+            let access_hash = match &u.raw {
+                tl::enums::User::User(raw) => raw.access_hash.unwrap_or(0),
+                _ => 0,
+            };
+            Ok(tl::enums::InputPeer::User(tl::types::InputPeerUser {
+                user_id: u.raw.id(),
+                access_hash,
+            }))
+        },
+        Peer::Group(g) => match &g.raw {
+            tl::enums::Chat::Chat(chat) => Ok(tl::enums::InputPeer::Chat(tl::types::InputPeerChat {
+                chat_id: chat.id,
+            })),
+            tl::enums::Chat::Channel(channel) => Ok(tl::enums::InputPeer::Channel(tl::types::InputPeerChannel {
+                channel_id: channel.id,
+                access_hash: channel.access_hash.ok_or("No access hash for group")?,
+            })),
+            _ => Err("Unsupported group type".to_string()),
+        },
+    }
+}
+
+fn peer_display_name(peer: &Peer) -> String {
+    match peer {
+        Peer::Channel(c) => c.raw.title.clone(),
+        Peer::Group(g) => match &g.raw {
+            tl::enums::Chat::Chat(chat) => chat.title.clone(),
+            tl::enums::Chat::Channel(channel) => channel.title.clone(),
+            _ => "team".to_string(),
+        },
+        Peer::User(u) => u.full_name(),
+    }
 }
 
 fn serialize_i64_to_string<S>(val: &i64, serializer: S) -> Result<S::Ok, S::Error>
@@ -124,6 +183,7 @@ pub async fn cmd_get_teams(
                     is_channel: false,
                     is_supergroup: c.raw.megagroup,
                     top_members: Vec::new(),
+                    unread_count: get_dialog_unread_count(&dialog.raw),
                 });
             },
             Peer::Group(g) => {
@@ -140,6 +200,7 @@ pub async fn cmd_get_teams(
                     is_channel: false,
                     is_supergroup: false,
                     top_members: Vec::new(),
+                    unread_count: get_dialog_unread_count(&dialog.raw),
                 });
             },
             _ => {}
@@ -148,6 +209,64 @@ pub async fn cmd_get_teams(
     
     log::info!("Found {} groups", teams.len());
     Ok(teams)
+}
+
+#[tauri::command]
+pub async fn cmd_get_direct_chats(
+    state: State<'_, TelegramState>,
+) -> Result<Vec<DirectChatInfo>, String> {
+    let client_opt = state.client.lock().await.clone();
+    if client_opt.is_none() {
+        return Ok(Vec::new());
+    }
+    let client = client_opt.unwrap();
+    let current_user_id = client.get_me().await.map_err(map_error)?.raw.id();
+    let mut direct_chats = Vec::new();
+
+    log::info!("Fetching direct one-on-one Telegram dialogs...");
+    let mut dialogs = client.iter_dialogs();
+
+    while let Some(dialog) = dialogs.next().await.map_err(|e| e.to_string())? {
+        if let Peer::User(user) = &dialog.peer {
+            let user_id = user.raw.id();
+            if user_id == current_user_id {
+                continue;
+            }
+
+            let (phone, access_hash) = match &user.raw {
+                tl::enums::User::User(raw) => (raw.phone.clone(), raw.access_hash),
+                _ => (None, None),
+            };
+
+            state.peer_cache.write().await.insert(user_id, dialog.peer.clone());
+
+            direct_chats.push(DirectChatInfo {
+                user_id,
+                first_name: user.first_name().unwrap_or("Unknown").to_string(),
+                last_name: user.last_name().map(|s| s.to_string()),
+                username: user.username().map(|s| s.to_string()),
+                phone,
+                unread_count: get_dialog_unread_count(&dialog.raw),
+                invite_eligible: user.mutual_contact(),
+                invite_restriction: if user.mutual_contact() {
+                    None
+                } else {
+                    Some("Telegram only allows direct invites for mutual contacts. Share an invite link with this person instead.".to_string())
+                },
+                access_hash,
+            });
+        }
+    }
+
+    log::info!("Found {} direct chats", direct_chats.len());
+    Ok(direct_chats)
+}
+
+fn get_dialog_unread_count(dialog: &tl::enums::Dialog) -> i32 {
+    match dialog {
+        tl::enums::Dialog::Dialog(d) => d.unread_count,
+        tl::enums::Dialog::Folder(_) => 0,
+    }
 }
 
 #[tauri::command]
@@ -201,6 +320,8 @@ pub async fn cmd_get_team_members(
                 tl::enums::User::User(u) => u.access_hash,
                 _ => None,
             },
+            invite_eligible: true,
+            invite_restriction: None,
         });
         
         count += 1;
@@ -236,7 +357,7 @@ pub async fn cmd_search_users(
     
     for user in f.users {
         if let tl::enums::User::User(u) = user {
-            let first_name = u.first_name.unwrap_or_else(|| "Unknown".to_string());
+            let first_name = u.first_name.clone().unwrap_or_else(|| "Unknown".to_string());
             let last_name = u.last_name.clone();
             let username = u.username.clone();
             let phone = u.phone.clone();
@@ -251,8 +372,18 @@ pub async fn cmd_search_users(
                 is_owner: false,
                 role: "member".to_string(),
                 photo_url: None,
+                invite_eligible: u.mutual_contact,
+                invite_restriction: if u.mutual_contact {
+                    None
+                } else {
+                    Some("Telegram only allows direct invites for mutual contacts. Share an invite link with this person instead.".to_string())
+                },
                 access_hash: u.access_hash,
             });
+            state.peer_cache.write().await.insert(
+                u.id,
+                Peer::User(grammers_client::types::User::from_raw(tl::enums::User::User(u.clone()))),
+            );
         }
     }
     
@@ -331,8 +462,18 @@ pub async fn cmd_get_contacts(
                         is_owner: false,
                         role: "member".to_string(),
                         photo_url: None,
+                        invite_eligible: u.mutual_contact,
+                        invite_restriction: if u.mutual_contact {
+                            None
+                        } else {
+                            Some("Telegram only allows direct invites for mutual contacts. Share an invite link with this person instead.".to_string())
+                        },
                         access_hash: u.access_hash,
                     });
+                    state.peer_cache.write().await.insert(
+                        u.id,
+                        Peer::User(grammers_client::types::User::from_raw(tl::enums::User::User(u.clone()))),
+                    );
                 }
             }
         },
@@ -391,6 +532,114 @@ pub async fn cmd_add_team_member(
         _ => return Err("Invalid peer type".to_string()),
     }
     
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn cmd_send_team_invite_link(
+    team_id: i64,
+    user_id_str: String,
+    access_hash_str: Option<String>,
+    state: State<'_, TelegramState>,
+) -> Result<bool, String> {
+    let client_opt = state.client.lock().await.clone();
+    if client_opt.is_none() {
+        return Ok(false);
+    }
+    let client = client_opt.unwrap();
+
+    let user_id = user_id_str.parse::<i64>().map_err(|_| "Invalid user ID format")?;
+    let access_hash = access_hash_str
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+
+    let team_peer = resolve_peer(&client, Some(team_id), &state.peer_cache).await?;
+    let team_input_peer = peer_to_input_peer(&team_peer)?;
+    let team_name = peer_display_name(&team_peer);
+
+    log::info!("Creating invite link for team {} (ID: {})", team_name, team_id);
+    
+    let exported = client.invoke(&tl::functions::messages::ExportChatInvite {
+        legacy_revoke_permanent: false,
+        request_needed: false,
+        peer: team_input_peer,
+        expire_date: None,
+        usage_limit: None,
+        title: Some("tgTeams invite".to_string()),
+        subscription_pricing: None,
+    }).await.map_err(|e| {
+        log::error!("Failed to create invite link: {}", e);
+        format!("Failed to create invite link: {}", e)
+    })?;
+
+    let invite_link = match exported {
+        tl::enums::ExportedChatInvite::ChatInviteExported(invite) => {
+            log::info!("Successfully created invite link: {}", invite.link);
+            invite.link
+        },
+        tl::enums::ExportedChatInvite::ChatInvitePublicJoinRequests => {
+            log::warn!("Team {} uses join requests instead of invite links", team_id);
+            return Err("This team is set to require join approval. Please change the group settings to allow invite links, or share the group's username with the user.".to_string());
+        }
+    };
+
+    let cached_peer = {
+        let cache = state.peer_cache.read().await;
+        cache.get(&user_id).cloned()
+    };
+
+    log::info!("Sending invite link to user_id: {}, access_hash: {}", user_id, access_hash);
+
+    let target_peer = if let Some(peer) = cached_peer {
+        log::info!("Using cached peer for user {}", user_id);
+        peer_to_input_peer(&peer)?
+    } else {
+        if access_hash == 0 {
+            log::error!("No access hash available for user {}", user_id);
+            return Err("Cannot message this user because Telegram did not provide an access hash. Try searching for the user first to get their contact info.".to_string());
+        }
+        log::info!("Creating InputPeer from access_hash for user {}", user_id);
+        tl::enums::InputPeer::User(tl::types::InputPeerUser {
+            user_id,
+            access_hash,
+        })
+    };
+
+    let message = format!("You're invited to join {}:\n{}", team_name, invite_link);
+    log::info!("Invite message to send: {}", message);
+
+    match client.invoke(&tl::functions::messages::SendMessage {
+        no_webpage: false,
+        silent: false,
+        background: false,
+        clear_draft: true,
+        noforwards: false,
+        update_stickersets_order: false,
+        invert_media: false,
+        allow_paid_floodskip: false,
+        peer: target_peer,
+        reply_to: None,
+        message,
+        random_id: rand::random::<i64>(),
+        reply_markup: None,
+        entities: None,
+        schedule_date: None,
+        schedule_repeat_period: None,
+        send_as: None,
+        quick_reply_shortcut: None,
+        effect: None,
+        allow_paid_stars: None,
+        suggested_post: None,
+    }).await {
+Ok(_) => {
+            log::info!("Successfully sent invite link to user {}", user_id);
+        },
+        Err(e) => {
+            log::error!("Failed to send invite message: {}", e);
+            return Err(format!("Failed to send invite link: {}. The user may have privacy restrictions that prevent receiving messages from non-contacts.", e));
+        }
+    }
+
     Ok(true)
 }
 
@@ -491,7 +740,7 @@ pub async fn cmd_create_team(
 ) -> Result<TeamInfo, String> {
     let client_opt = state.client.lock().await.clone();
     if client_opt.is_none() {
-        return Ok(TeamInfo { id: 999, name, username: None, member_count: 0, is_channel: false, is_supergroup: true, top_members: Vec::new() });
+        return Ok(TeamInfo { id: 999, name, username: None, member_count: 0, is_channel: false, is_supergroup: true, top_members: Vec::new(), unread_count: 0 });
     }
     let client = client_opt.unwrap();
     
@@ -529,6 +778,7 @@ pub async fn cmd_create_team(
         is_channel: false,
         is_supergroup: true,
         top_members: Vec::new(),
+        unread_count: 0,
     })
 }
 
@@ -622,6 +872,8 @@ pub async fn cmd_get_team_messages(
     limit: Option<i32>,
     state: State<'_, TelegramState>,
 ) -> Result<Vec<ChatMessage>, String> {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
     let client_opt = state.client.lock().await.clone();
     if client_opt.is_none() {
         return Ok(Vec::new());
@@ -635,10 +887,23 @@ pub async fn cmd_get_team_messages(
     let msg_limit = limit.unwrap_or(1000) as usize;
     let mut messages = Vec::new();
     let mut iter = client.iter_messages(&peer);
+    let day_ago = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::from_secs(0))
+        .saturating_sub(Duration::from_secs(24 * 60 * 60));
 
     let mut count = 0;
     while let Some(msg) = iter.next().await.map_err(|e| e.to_string())? {
         if count >= msg_limit {
+            break;
+        }
+
+        let msg_timestamp = SystemTime::from(msg.date())
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_secs();
+
+        if msg_timestamp < day_ago.as_secs() {
             break;
         }
 
@@ -738,6 +1003,40 @@ pub async fn cmd_send_team_message(
     
     client.send_message(&peer, message_obj).await.map_err(|e| format!("Failed to send message: {}", e))?;
     
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn cmd_send_team_file(
+    team_id: Option<i64>,
+    path: String,
+    caption: Option<String>,
+    state: State<'_, TelegramState>,
+) -> Result<bool, String> {
+    let client_opt = state.client.lock().await.clone();
+    if client_opt.is_none() {
+        return Ok(false);
+    }
+    let client = client_opt.unwrap();
+
+    let metadata = tokio::fs::metadata(&path).await.map_err(|e| e.to_string())?;
+    let mut file = tokio::fs::File::open(&path).await.map_err(|e| e.to_string())?;
+    let file_name = std::path::Path::new(&path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".to_string());
+
+    let uploaded = client
+        .upload_stream(&mut file, metadata.len() as usize, file_name)
+        .await
+        .map_err(map_error)?;
+    let peer = resolve_peer(&client, team_id, &state.peer_cache).await?;
+    let message = grammers_client::InputMessage::new()
+        .text(caption.unwrap_or_default())
+        .file(uploaded);
+
+    client.send_message(&peer, message).await.map_err(map_error)?;
+
     Ok(true)
 }
 

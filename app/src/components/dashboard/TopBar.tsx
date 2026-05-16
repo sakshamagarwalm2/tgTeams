@@ -1,5 +1,6 @@
-import { HardDrive, LayoutGrid, Sun, Moon } from 'lucide-react';
+import { HardDrive, LayoutGrid, Sun, Moon, Plus } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
+import { MemberStack } from './MemberStack';
 
 interface TopBarProps {
     currentFolderName: string;
@@ -12,11 +13,14 @@ interface TopBarProps {
     setViewMode: (mode: 'grid' | 'list') => void;
     searchTerm: string;
     onSearchChange: (term: string) => void;
+    members?: any[];
+    onAddSubscriber?: () => void;
 }
 
 export function TopBar({
     currentFolderName, selectedIds, onShowMoveModal, onBulkDownload, onBulkDelete,
-    onDownloadFolder, viewMode, setViewMode, searchTerm, onSearchChange
+    onDownloadFolder, viewMode, setViewMode, searchTerm, onSearchChange, members = [],
+    onAddSubscriber
 }: TopBarProps) {
     const { theme, toggleTheme } = useTheme();
 
@@ -30,14 +34,30 @@ export function TopBar({
                 </div>
             </div>
 
-            <div className="flex-1 max-w-md mx-4">
-                <input
-                    type="text"
-                    placeholder="Search files..."
-                    className="w-full bg-telegram-hover border border-telegram-border rounded-lg px-3 py-1.5 text-sm text-telegram-text placeholder:text-telegram-subtext focus:outline-none focus:border-telegram-primary/50 transition-colors"
-                    value={searchTerm}
-                    onChange={(e) => onSearchChange(e.target.value)}
-                />
+            <div className="flex-1 max-w-md mx-4 flex items-center gap-4">
+                <div className="relative flex-1">
+                    <input
+                        type="text"
+                        placeholder="Search files..."
+                        className="w-full bg-telegram-hover border border-telegram-border rounded-lg px-3 py-1.5 text-sm text-telegram-text placeholder:text-telegram-subtext focus:outline-none focus:border-telegram-primary/50 transition-colors"
+                        value={searchTerm}
+                        onChange={(e) => onSearchChange(e.target.value)}
+                    />
+                </div>
+                {(members.length > 0 || onAddSubscriber) && (
+                    <div className="flex items-center gap-2">
+                        <MemberStack members={members} size="sm" />
+                        {onAddSubscriber && (
+                            <button
+                                onClick={onAddSubscriber}
+                                className="w-8 h-8 rounded-full bg-telegram-primary/10 hover:bg-telegram-primary/20 text-telegram-primary flex items-center justify-center transition-all shadow-sm active:scale-95"
+                                title="Add Subscriber"
+                            >
+                                <Plus className="w-4 h-4" />
+                            </button>
+                        )}
+                    </div>
+                )}
             </div>
 
             <div className="flex items-center gap-2">

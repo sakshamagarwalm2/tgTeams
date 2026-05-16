@@ -29,10 +29,20 @@ pub struct FileMetadata {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Member {
+    pub user_id: i64,
+    pub first_name: String,
+    pub last_name: Option<String>,
+    pub photo_url: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FolderMetadata {
     pub id: i64,
     pub parent_id: Option<i64>,
     pub name: String,
+    pub member_count: i32,
+    pub top_members: Vec<Member>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

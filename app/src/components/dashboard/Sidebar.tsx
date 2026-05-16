@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { SidebarItem } from './SidebarItem';
 import { BandwidthWidget } from './BandwidthWidget';
 import { TeamsPanel } from './TeamsPanel';
+import { MemberStack } from './MemberStack';
 import { TelegramFolder, BandwidthStats } from '../../types';
 
 interface GroupInfo {
@@ -12,6 +13,7 @@ interface GroupInfo {
     name: string;
     username: string | null;
     member_count: number;
+    top_members?: any[];
 }
 
 interface SidebarProps {
@@ -131,6 +133,8 @@ export function Sidebar({
                                         onDelete={() => onDelete(folder.id, folder.name)}
                                         onRename={(newName) => onRename(folder.id, folder.name, newName)}
                                         folderId={folder.id}
+                                        memberCount={folder.member_count}
+                                        topMembers={folder.top_members}
                                         />
                                 ))}
 
@@ -198,8 +202,14 @@ export function Sidebar({
                                         }`}
                                     >
                                         <MessageSquare className="w-4 h-4" />
-                                        <span className="flex-1 text-left truncate">{group.name}</span>
-                                        <span className="text-telegram-subtext text-[10px]">{group.member_count || ''}</span>
+                                        <div className="flex-1 text-left min-w-0">
+                                            <p className="truncate">{group.name}</p>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            {group.top_members && group.top_members.length > 0 && (
+                                                <MemberStack members={group.top_members} size="sm" maxDisplay={2} />
+                                            )}
+                                        </div>
                                     </button>
                                 ))}
 

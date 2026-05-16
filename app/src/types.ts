@@ -12,6 +12,8 @@ export interface TelegramFolder {
     id: number;
     name: string;
     parent_id?: number;
+    member_count?: number;
+    top_members?: any[];
 }
 
 export interface QueueItem {

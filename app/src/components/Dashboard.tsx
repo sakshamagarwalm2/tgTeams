@@ -7,11 +7,15 @@ import { toast } from 'sonner';
 import { TelegramFile, BandwidthStats } from '../types';
 import { formatBytes } from '../utils';
 
+import { Search, Loader2, Plus } from 'lucide-react';
+
 // Components
 import { Sidebar } from './dashboard/Sidebar';
 import { TopBar } from './dashboard/TopBar';
 import { FileExplorer } from './dashboard/FileExplorer';
 import { TeamChat } from './dashboard/TeamChat';
+import { MemberStack } from './dashboard/MemberStack';
+import { AddSubscriberModal } from './dashboard/AddSubscriberModal';
 import { UploadQueue } from './dashboard/UploadQueue';
 import { DownloadQueue } from './dashboard/DownloadQueue';
 import { MoveToFolderModal } from './dashboard/MoveToFolderModal';
@@ -42,6 +46,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     const [internalDragFileId, _setInternalDragFileId] = useState<number | null>(null);
     const [activeGroupId, setActiveGroupId] = useState<number | null>(null);
     const [groups, setGroups] = useState<{id: number, name: string, username: string | null, member_count: number}[]>([]);
+    const [activeMembers, setActiveMembers] = useState<any[]>([]);
+    const [showAddSubscriber, setShowAddSubscriber] = useState(false);
     const internalDragRef = useRef<number | null>(null);
 
     const loadGroups = async () => {
@@ -53,9 +59,27 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
         }
     };
 
+    const loadActiveMembers = async (id: number | null) => {
+        if (id === null) {
+            setActiveMembers([]);
+            return;
+        }
+        try {
+            const result = await invoke<any[]>('cmd_get_team_members', { teamId: id });
+            setActiveMembers(result);
+        } catch (e) {
+            console.error('Failed to load members:', e);
+            setActiveMembers([]);
+        }
+    };
+
     useEffect(() => {
         loadGroups();
     }, []);
+
+    useEffect(() => {
+        loadActiveMembers(activeFolderId || activeGroupId);
+    }, [activeFolderId, activeGroupId]);
 
     const setInternalDragFileId = (id: number | null) => {
         internalDragRef.current = id;
@@ -282,10 +306,22 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
             <main className="flex-1 flex flex-col overflow-hidden" onClick={(e) => { if (e.target === e.currentTarget) setSelectedIds([]); }}>
                 {activeGroupId !== null ? (
-                    <TeamChat 
-                        groupId={activeGroupId} 
-                        groupName={groups.find(g => g.id === activeGroupId)?.name || 'Group Chat'}
-                    />
+                    <div className="flex-1 flex flex-col min-h-0 relative">
+                        <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
+                            <MemberStack members={activeMembers} size="sm" />
+                            <button
+                                onClick={() => setShowAddSubscriber(true)}
+                                className="w-8 h-8 rounded-full bg-telegram-primary/10 hover:bg-telegram-primary/20 text-telegram-primary flex items-center justify-center transition-all shadow-sm active:scale-95"
+                                title="Add Subscriber"
+                            >
+                                <Plus className="w-4 h-4" />
+                            </button>
+                        </div>
+                        <TeamChat 
+                            groupId={activeGroupId} 
+                            groupName={groups.find(g => g.id === activeGroupId)?.name || 'Group Chat'}
+                        />
+                    </div>
                 ) : (
                     <>
                         <TopBar
@@ -299,6 +335,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                             setViewMode={setViewMode}
                             searchTerm={searchTerm}
                             onSearchChange={setSearchTerm}
+                            members={activeMembers}
+                            onAddSubscriber={activeFolderId ? () => setShowAddSubscriber(true) : undefined}
                         />
                         {searchTerm.length > 2 && (
                             <div className="px-6 pt-4 pb-0">
@@ -344,6 +382,14 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                 onCancelItem={cancelDownloadItem}
                 onRetryItem={retryDownloadItem}
             />
+
+            {showAddSubscriber && (activeFolderId || activeGroupId) && (
+                <AddSubscriberModal
+                    teamId={(activeFolderId || activeGroupId)!}
+                    onClose={() => setShowAddSubscriber(false)}
+                    onSuccess={() => loadActiveMembers(activeFolderId || activeGroupId)}
+                />
+            )}
         </div>
     );
 }

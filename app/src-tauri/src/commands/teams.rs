@@ -12,10 +12,12 @@ pub struct TeamInfo {
     pub member_count: i32,
     pub is_channel: bool,
     pub is_supergroup: bool,
+    pub top_members: Vec<TeamMember>,
 }
 
 #[derive(Clone, serde::Serialize)]
 pub struct TeamMember {
+    #[serde(serialize_with = "serialize_i64_to_string")]
     pub user_id: i64,
     pub first_name: String,
     pub last_name: Option<String>,
@@ -24,6 +26,26 @@ pub struct TeamMember {
     pub is_admin: bool,
     pub is_owner: bool,
     pub role: String,
+    pub photo_url: Option<String>,
+    #[serde(serialize_with = "serialize_opt_i64_to_string")]
+    pub access_hash: Option<i64>,
+}
+
+fn serialize_i64_to_string<S>(val: &i64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&val.to_string())
+}
+
+fn serialize_opt_i64_to_string<S>(val: &Option<i64>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match val {
+        Some(v) => serializer.serialize_str(&v.to_string()),
+        None => serializer.serialize_none(),
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -68,9 +90,10 @@ pub async fn cmd_get_teams(
                     id,
                     name,
                     username,
-                    member_count: 0,
+                    member_count: c.raw.participants_count.unwrap_or(0),
                     is_channel: false,
                     is_supergroup: c.raw.megagroup,
+                    top_members: Vec::new(),
                 });
             },
             Peer::Group(g) => {
@@ -86,6 +109,7 @@ pub async fn cmd_get_teams(
                     member_count: 0,
                     is_channel: false,
                     is_supergroup: false,
+                    top_members: Vec::new(),
                 });
             },
             _ => {}
@@ -105,11 +129,55 @@ pub async fn cmd_get_team_members(
     if client_opt.is_none() {
         return Ok(Vec::new());
     }
-    let _client = client_opt.unwrap();
+    let client = client_opt.unwrap();
     
     log::info!("Fetching members for team/channel: {}", team_id);
     
-    Ok(Vec::new())
+    let peer = resolve_peer(&client, Some(team_id), &state.peer_cache).await?;
+    
+    let mut members = Vec::new();
+    let mut participants = client.iter_participants(&peer);
+    
+    // Limit to 100 members for performance
+    let mut count = 0;
+    while let Some(participant) = participants.next().await.map_err(|e| e.to_string())? {
+        if count >= 100 {
+            break;
+        }
+        
+        let user = &participant.user;
+        let first_name = user.first_name().unwrap_or("Unknown").to_string();
+        let last_name = user.last_name().map(|s| s.to_string());
+        let username = user.username().map(|s| s.to_string());
+        
+        // Basic role detection from the grammers-client Role
+        let (is_admin, is_owner, role_name) = match &participant.role {
+            grammers_client::types::Role::Creator(_) => (true, true, "owner".to_string()),
+            grammers_client::types::Role::Admin(_) => (true, false, "admin".to_string()),
+            _ => (false, false, "member".to_string()),
+        };
+
+        members.push(TeamMember {
+            user_id: user.raw.id(),
+            first_name,
+            last_name,
+            username,
+            phone: None, // Phone usually not available for privacy
+            is_admin,
+            is_owner,
+            role: role_name,
+            photo_url: None,
+            access_hash: match &user.raw {
+                tl::enums::User::User(u) => u.access_hash,
+                _ => None,
+            },
+        });
+        
+        count += 1;
+    }
+    
+    log::info!("Found {} members for team {}", members.len(), team_id);
+    Ok(members)
 }
 
 #[tauri::command]
@@ -152,6 +220,8 @@ pub async fn cmd_search_users(
                 is_admin: false,
                 is_owner: false,
                 role: "member".to_string(),
+                photo_url: None,
+                access_hash: u.access_hash,
             });
         }
     }
@@ -161,9 +231,104 @@ pub async fn cmd_search_users(
 }
 
 #[tauri::command]
+pub async fn cmd_debug_subscriber_flow(
+    team_id: i64,
+    query: String,
+    state: State<'_, TelegramState>,
+) -> Result<String, String> {
+    let client_opt = state.client.lock().await.clone();
+    if client_opt.is_none() {
+        return Err("Client not connected".to_string());
+    }
+    let client = client_opt.unwrap();
+    
+    log::info!("DEBUG: Searching for '{}'", query);
+    let result = client.invoke(&tl::functions::contacts::Search {
+        q: query.clone(),
+        limit: 10,
+    }).await.map_err(map_error)?;
+    
+    let mut debug_info = format!("Search results for '{}':\n", query);
+    
+    if let tl::enums::contacts::Found::Found(f) = result {
+        for user in f.users {
+            if let tl::enums::User::User(u) = user {
+                let name = format!("{} {}", u.first_name.clone().unwrap_or_default(), u.last_name.clone().unwrap_or_default());
+                debug_info.push_str(&format!("- User: {} (ID: {}, Hash: {})\n", name, u.id, u.access_hash.unwrap_or(0)));
+                
+                // Try to resolve peer for this user
+                let input_user = tl::enums::InputUser::User(tl::types::InputUser {
+                    user_id: u.id,
+                    access_hash: u.access_hash.unwrap_or(0),
+                });
+                
+                debug_info.push_str(&format!("  Attempting to resolve peer for user {}...\n", u.id));
+                // Add to cache manually for debugging
+                state.peer_cache.write().await.insert(u.id, Peer::User(grammers_client::types::User::from_raw(tl::enums::User::User(u.clone()))));
+            }
+        }
+    }
+    
+    Ok(debug_info)
+}
+
+#[tauri::command]
+pub async fn cmd_get_contacts(
+    state: State<'_, TelegramState>,
+) -> Result<Vec<TeamMember>, String> {
+    let client_opt = state.client.lock().await.clone();
+    if client_opt.is_none() {
+        return Ok(Vec::new());
+    }
+    let client = client_opt.unwrap();
+    
+    log::info!("Fetching Telegram contacts");
+    
+    let result = client.invoke(&tl::functions::contacts::GetContacts {
+        hash: 0,
+    }).await.map_err(map_error)?;
+    
+    let mut results = Vec::new();
+    
+    match result {
+        tl::enums::contacts::Contacts::Contacts(c) => {
+            log::info!("Received {} contacts and {} users from Telegram", c.contacts.len(), c.users.len());
+            for user in c.users {
+                if let tl::enums::User::User(u) = user {
+                    let first_name = u.first_name.clone().unwrap_or_else(|| "Unknown".to_string());
+                    let last_name = u.last_name.clone();
+                    let username = u.username.clone();
+                    let phone = u.phone.clone();
+                    
+                    results.push(TeamMember {
+                        user_id: u.id,
+                        first_name,
+                        last_name,
+                        username,
+                        phone,
+                        is_admin: false,
+                        is_owner: false,
+                        role: "member".to_string(),
+                        photo_url: None,
+                        access_hash: u.access_hash,
+                    });
+                }
+            }
+        },
+        tl::enums::contacts::Contacts::NotModified => {
+            log::info!("Contacts not modified since last fetch");
+        },
+    }
+    
+    log::info!("Found {} contacts", results.len());
+    Ok(results)
+}
+
+#[tauri::command]
 pub async fn cmd_add_team_member(
     team_id: i64,
-    user_id: i64,
+    user_id_str: String,
+    access_hash_str: Option<String>,
     state: State<'_, TelegramState>,
 ) -> Result<bool, String> {
     let client_opt = state.client.lock().await.clone();
@@ -172,9 +337,16 @@ pub async fn cmd_add_team_member(
     }
     let client = client_opt.unwrap();
     
-    log::info!("Adding user {} to team {}", user_id, team_id);
+    let user_id = user_id_str.parse::<i64>().map_err(|_| "Invalid user ID format")?;
+    let access_hash = access_hash_str.and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+
+    log::info!("Adding user {} (hash: {}) to team {}", user_id, access_hash, team_id);
     
     let peer = resolve_peer(&client, Some(team_id), &state.peer_cache).await?;
+    let input_user = tl::enums::InputUser::User(tl::types::InputUser {
+        user_id,
+        access_hash,
+    });
     
     match &peer {
         Peer::Channel(c) => {
@@ -185,26 +357,19 @@ pub async fn cmd_add_team_member(
             
             client.invoke(&tl::functions::channels::InviteToChannel {
                 channel: input_channel,
-                users: vec![tl::enums::InputUser::User(tl::types::InputUser {
-                    user_id,
-                    access_hash: 0,
-                })],
+                users: vec![input_user],
             }).await.map_err(|e| format!("Failed to add member: {}", e))?;
         },
         Peer::Group(g) => {
             client.invoke(&tl::functions::messages::AddChatUser {
                 chat_id: g.raw.id(),
-                user_id: tl::enums::InputUser::User(tl::types::InputUser {
-                    user_id,
-                    access_hash: 0,
-                }),
+                user_id: input_user,
                 fwd_limit: 100,
             }).await.map_err(|e| format!("Failed to add member: {}", e))?;
         },
         _ => return Err("Invalid peer type".to_string()),
     }
     
-    log::info!("Added user {} to team {}", user_id, team_id);
     Ok(true)
 }
 
@@ -274,7 +439,7 @@ pub async fn cmd_create_team(
 ) -> Result<TeamInfo, String> {
     let client_opt = state.client.lock().await.clone();
     if client_opt.is_none() {
-        return Ok(TeamInfo { id: 999, name, username: None, member_count: 0, is_channel: false, is_supergroup: true });
+        return Ok(TeamInfo { id: 999, name, username: None, member_count: 0, is_channel: false, is_supergroup: true, top_members: Vec::new() });
     }
     let client = client_opt.unwrap();
     
@@ -311,6 +476,7 @@ pub async fn cmd_create_team(
         member_count: 1,
         is_channel: false,
         is_supergroup: true,
+        top_members: Vec::new(),
     })
 }
 

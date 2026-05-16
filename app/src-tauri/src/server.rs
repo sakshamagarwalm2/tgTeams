@@ -3,6 +3,7 @@ use actix_cors::Cors;
 use crate::commands::TelegramState;
 use crate::commands::utils::resolve_peer;
 use grammers_client::types::Media;
+use grammers_tl_types as tl;
 
 use std::sync::Arc;
 
@@ -130,6 +131,76 @@ async fn stream_media(
     }
 }
 
+#[get("/avatar/{user_id}")]
+async fn stream_avatar(
+    user_id: web::Path<i64>,
+    query: web::Query<StreamQuery>,
+    data: web::Data<Arc<TelegramState>>,
+    token_data: web::Data<StreamTokenData>,
+) -> impl Responder {
+    let uid = user_id.into_inner();
+
+    // Validate session token
+    match &query.token {
+        Some(t) if t == &token_data.token => {
+            log::debug!("Avatar request: Token validated successfully for user {}", uid);
+        },
+        _ => {
+            log::error!("Avatar request failed: Invalid or missing stream token for user {}", uid);
+            return HttpResponse::Forbidden().body("Invalid or missing stream token")
+        },
+    }
+
+    let client_opt = {
+        data.client.lock().await.clone()
+    };
+
+    if let Some(client) = client_opt {
+        // Resolve the user to get a User object with photo
+        let peer = match resolve_peer(&client, Some(uid), &data.peer_cache).await {
+            Ok(p) => p,
+            Err(_) => return HttpResponse::NotFound().body("User not found"),
+        };
+
+        if let grammers_client::types::Peer::User(user) = peer {
+            // For users, the photo is available through the raw TL type or we can fetch it.
+            let photo_opt: Option<grammers_client::types::ChatPhoto> = match &user.raw {
+                tl::enums::User::User(u) => match &u.photo {
+                    Some(tl::enums::UserProfilePhoto::Photo(_p)) => {
+                        // UserProfilePhoto is not directly downloadable, we need to convert it.
+                        None
+                    },
+                    _ => None,
+                },
+                _ => None,
+            };
+
+            if let Some(photo) = photo_opt {
+                let mut download_iter = client.iter_download(&photo);
+                let stream = async_stream::stream! {
+                    while let Some(chunk) = download_iter.next().await.transpose() {
+                        match chunk {
+                            Ok(bytes) => yield Ok::<_, actix_web::Error>(web::Bytes::from(bytes)),
+                            Err(e) => {
+                                log::error!("Avatar stream error on user {}: {}", uid, e);
+                                break;
+                            }
+                        }
+                    }
+                };
+                
+                return HttpResponse::Ok()
+                    .insert_header(("Content-Type", "image/jpeg"))
+                    .insert_header(("Cache-Control", "private, max-age=3600"))
+                    .streaming(stream);
+            }
+        }
+        HttpResponse::NotFound().body("Avatar not found")
+    } else {
+        HttpResponse::ServiceUnavailable().body("Telegram client not connected")
+    }
+}
+
 fn mime_type_from_media(media: &Media) -> String {
     match media {
         Media::Document(d) => d.mime_type().unwrap_or("application/octet-stream").to_string(),
@@ -156,6 +227,7 @@ pub async fn start_server(state: Arc<TelegramState>, port: u16, token: String) -
             .app_data(state_data.clone())
             .app_data(token_data.clone())
             .service(stream_media)
+            .service(stream_avatar)
     })
     .bind(("127.0.0.1", port))?
     .run();

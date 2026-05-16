@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Plus, Pencil, Check } from 'lucide-react';
+import { MemberStack } from './MemberStack';
 
 interface SidebarItemProps {
     icon: React.ElementType;
@@ -10,9 +11,14 @@ interface SidebarItemProps {
     onDelete?: () => void;
     onRename?: (newName: string) => void;
     folderId: number | null;
+    memberCount?: number;
+    topMembers?: any[];
 }
 
-export function SidebarItem({ icon: Icon, label, active = false, onClick, onDrop, onDelete, onRename, folderId }: SidebarItemProps) {
+export function SidebarItem({ 
+    icon: Icon, label, active = false, onClick, onDrop, onDelete, onRename, 
+    folderId, memberCount, topMembers = [] 
+}: SidebarItemProps) {
     const [isOver, setIsOver] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editValue, setEditValue] = useState(label);
@@ -130,28 +136,36 @@ export function SidebarItem({ icon: Icon, label, active = false, onClick, onDrop
             <Icon className={`w-4 h-4 ${isOver ? 'text-telegram-primary' : ''}`} />
             <span className="flex-1 text-left truncate">{label}</span>
             
-            {folderId !== null && (
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {onRename && (
-                        <div 
-                            onClick={(e) => { e.stopPropagation(); console.log("[SidebarItem] Pencil clicked, current label='", label, "', setting isEditing=true"); setIsEditing(true); }} 
-                            className="p-1 hover:text-telegram-primary rounded hover:bg-white/5"
-                            title="Rename"
-                        >
-                            <Pencil className="w-3 h-3" />
-                        </div>
-                    )}
-                    {onDelete && (
-                        <div 
-                            onClick={(e) => { e.stopPropagation(); onDelete(); }} 
-                            className="p-1 hover:text-red-400 rounded hover:bg-white/5"
-                            title="Delete"
-                        >
-                            <Plus className="w-3 h-3 rotate-45" />
-                        </div>
-                    )}
-                </div>
-            )}
+            <div className="flex items-center gap-2">
+                {topMembers && topMembers.length > 0 && (
+                    <div className={active ? '' : 'opacity-0 group-hover:opacity-100 transition-opacity'}>
+                        <MemberStack members={topMembers} size="sm" maxDisplay={2} />
+                    </div>
+                )}
+                
+                {folderId !== null && (
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {onRename && (
+                            <div 
+                                onClick={(e) => { e.stopPropagation(); console.log("[SidebarItem] Pencil clicked, current label='", label, "', setting isEditing=true"); setIsEditing(true); }} 
+                                className="p-1 hover:text-telegram-primary rounded hover:bg-white/5"
+                                title="Rename"
+                            >
+                                <Pencil className="w-3 h-3" />
+                            </div>
+                        )}
+                        {onDelete && (
+                            <div 
+                                onClick={(e) => { e.stopPropagation(); onDelete(); }} 
+                                className="p-1 hover:text-red-400 rounded hover:bg-white/5"
+                                title="Delete"
+                            >
+                                <Plus className="w-3 h-3 rotate-45" />
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
         </button>
     )
 }

@@ -24,6 +24,8 @@ pub async fn cmd_create_folder(
             id: mock_id,
             name,
             parent_id: None,
+            member_count: 0,
+            top_members: Vec::new(),
         });
     }
     // -----------
@@ -68,6 +70,8 @@ pub async fn cmd_create_folder(
         id: chat_id,
         name,
         parent_id: None,
+        member_count: 1,
+        top_members: Vec::new(),
     })
 }
 
@@ -749,7 +753,13 @@ pub async fn cmd_scan_folders(
                 if name.to_lowercase().contains("[td]") {
                     log::info!(" -> MATCH via Title: {}", name);
                     let display_name = name.replace(" [TD]", "").replace(" [td]", "").replace("[TD]", "").replace("[td]", "").trim().to_string();
-                    folders.push(FolderMetadata { id, name: display_name, parent_id: None });
+                    folders.push(FolderMetadata { 
+                        id, 
+                        name: display_name, 
+                        parent_id: None,
+                        member_count: 0,
+                        top_members: Vec::new(),
+                    });
                     continue; 
                 }
 
@@ -763,10 +773,21 @@ pub async fn cmd_scan_folders(
                     channel: input_chan,
                 }).await {
                     Ok(tl::enums::messages::ChatFull::Full(f)) => {
-                        if let tl::enums::ChatFull::Full(cf) = f.full_chat {
+                        let member_count = match &f.full_chat {
+                            tl::enums::ChatFull::ChannelFull(cf) => cf.participants_count.unwrap_or(0),
+                            _ => 0,
+                        };
+
+                        if let tl::enums::ChatFull::ChannelFull(cf) = &f.full_chat {
                              if cf.about.contains("[telegram-drive-folder]") {
                                  log::info!(" -> MATCH via About: {}", name);
-                                 folders.push(FolderMetadata { id, name: name.clone(), parent_id: None });
+                                 folders.push(FolderMetadata { 
+                                     id, 
+                                     name: name.clone(), 
+                                     parent_id: None,
+                                     member_count,
+                                     top_members: Vec::new(),
+                                 });
                              }
                         }
                     },

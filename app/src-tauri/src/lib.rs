@@ -114,6 +114,7 @@ pub fn run() {
             commands::cmd_auth_qr_login,
             commands::cmd_auth_qr_poll,
             commands::cmd_get_teams,
+            commands::cmd_get_current_user,
             commands::cmd_get_team_members,
             commands::cmd_create_team,
             commands::cmd_delete_team,
@@ -125,6 +126,7 @@ pub fn run() {
             commands::cmd_send_team_message,
             commands::cmd_get_team_messages,
             commands::cmd_download_team_media,
+            commands::cmd_pin_team_message,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

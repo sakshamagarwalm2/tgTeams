@@ -1,8 +1,27 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { save } from '@tauri-apps/plugin-dialog';
-import { MessageSquare, Send, Image as ImageIcon, FileText, Film, Music, Paperclip, Download, File } from 'lucide-react';
+import { open, save } from '@tauri-apps/plugin-dialog';
+import {
+    AtSign,
+    Download,
+    File,
+    FileText,
+    Film,
+    Image as ImageIcon,
+    Mic,
+    MoreVertical,
+    Music,
+    Paperclip,
+    Pin,
+    Search,
+    Send,
+    Smile,
+    UserPlus,
+    Users,
+    Video,
+} from 'lucide-react';
 import { toast } from 'sonner';
+import { TelegramAvatar } from './TelegramAvatar';
 
 interface ChatMessage {
     id: number;
@@ -15,49 +34,64 @@ interface ChatMessage {
     media_name: string;
     media_size: number;
     mime_type: string;
+    outgoing?: boolean;
+    pinned?: boolean;
 }
 
 interface TeamChatProps {
-    groupId: number;
+    groupId: number | null;
     groupName: string;
+    memberCount?: number;
+    canManageMembers?: boolean;
+    isDirect?: boolean;
+    onManageMembers?: () => void;
 }
 
-export function TeamChat({ groupId, groupName }: TeamChatProps) {
+export function TeamChat({
+    groupId,
+    groupName,
+    memberCount,
+    canManageMembers = false,
+    isDirect = false,
+    onManageMembers,
+}: TeamChatProps) {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [newMessage, setNewMessage] = useState('');
     const [sending, setSending] = useState(false);
+    const [uploading, setUploading] = useState(false);
     const [downloadingId, setDownloadingId] = useState<number | null>(null);
+    const [streamToken, setStreamToken] = useState('');
+    const inputRef = useRef<HTMLInputElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         loadMessages();
+        const timer = window.setInterval(() => loadMessages(true), 5000);
+        return () => window.clearInterval(timer);
     }, [groupId]);
 
     useEffect(() => {
-        scrollToBottom();
+        invoke<string>('cmd_get_stream_token').then(setStreamToken).catch(console.error);
+    }, []);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    const loadMessages = async () => {
+    const loadMessages = async (silent = false) => {
         try {
-            setLoading(true);
+            if (!silent) setLoading(true);
             setError(null);
-            console.log('Loading messages for group:', groupId);
-            const result = await invoke<ChatMessage[]>('cmd_get_team_messages', { teamId: groupId, limit: 100 });
-            console.log('Messages loaded:', result.length, result);
-            setMessages(result);
+            const result = await invoke<ChatMessage[]>('cmd_get_team_messages', { teamId: groupId, limit: 1000 });
+            setMessages(result.slice().reverse());
         } catch (e) {
-            console.error('Failed to load messages:', e);
             setError(String(e));
-            toast.error(`Failed to load messages: ${e}`);
+            if (!silent) toast.error(`Failed to load messages: ${e}`);
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
-    };
-
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
     const handleSend = async () => {
@@ -66,60 +100,92 @@ export function TeamChat({ groupId, groupName }: TeamChatProps) {
             setSending(true);
             await invoke('cmd_send_team_message', { teamId: groupId, message: newMessage });
             setNewMessage('');
-            loadMessages();
-            toast.success('Message sent!');
+            loadMessages(true);
         } catch (e) {
-            console.error('Failed to send message:', e);
             toast.error(`Failed to send: ${e}`);
         } finally {
             setSending(false);
         }
     };
 
+    const handleAttach = async () => {
+        if (uploading) return;
+        try {
+            const selected = await open({
+                multiple: false,
+                directory: false,
+            });
+            if (!selected || Array.isArray(selected)) return;
+
+            setUploading(true);
+            await invoke('cmd_upload_file', {
+                path: selected,
+                folderId: groupId,
+                transferId: `team-${groupId ?? 'self'}-${Date.now()}`,
+            });
+            toast.success('File sent');
+            loadMessages(true);
+        } catch (e) {
+            toast.error(`Failed to attach file: ${e}`);
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const handleMention = () => {
+        setNewMessage((value) => `${value}${value && !value.endsWith(' ') ? ' ' : ''}@`);
+        requestAnimationFrame(() => inputRef.current?.focus());
+    };
+
+    const handlePin = async (messageId: number) => {
+        try {
+            await invoke('cmd_pin_team_message', { teamId: groupId, messageId });
+            toast.success('Message pinned');
+            loadMessages(true);
+        } catch (e) {
+            toast.error(`Failed to pin message: ${e}`);
+        }
+    };
+
+    const handleVoice = () => {
+        toast.info('Voice recording needs a recorder-to-file bridge. You can attach audio files now.');
+    };
+
     const handleDownload = async (msg: ChatMessage) => {
         if (!msg.has_media || downloadingId === msg.id) return;
         try {
             setDownloadingId(msg.id);
-            
             const fileName = msg.media_name || `media_${msg.id}`;
-            const ext = fileName.split('.').pop() || '';
-            const defaultName = ext ? `${fileName}` : `${fileName}.${ext}`;
-            
             const savePath = await save({
-                defaultPath: defaultName,
-                filters: [{ name: 'All Files', extensions: ['*'] }]
+                defaultPath: fileName,
+                filters: [{ name: 'All Files', extensions: ['*'] }],
             });
-            
+
             if (savePath) {
                 await invoke('cmd_download_team_media', {
                     messageId: msg.id,
                     teamId: groupId,
-                    savePath: savePath
+                    savePath,
                 });
-                toast.success('Downloaded successfully!');
+                toast.success('Downloaded successfully');
             }
         } catch (e) {
-            console.error('Download failed:', e);
             toast.error(`Download failed: ${e}`);
         } finally {
             setDownloadingId(null);
         }
     };
 
-    const formatDate = (dateStr: string) => {
-        try {
-            const parts = dateStr.split(' ');
-            if (parts.length >= 2) {
-                return `${parts[0]} ${parts[1]}`;
-            }
-            return dateStr;
-        } catch {
-            return dateStr;
+    const formatTime = (dateStr: string) => {
+        const parsed = new Date(dateStr.replace(' ', 'T'));
+        if (!Number.isNaN(parsed.getTime())) {
+            return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
+        return dateStr.split(' ')[1]?.slice(0, 5) || dateStr;
     };
 
     const formatFileSize = (bytes: number) => {
-        if (bytes === 0) return '';
+        if (!bytes) return '';
         const units = ['B', 'KB', 'MB', 'GB'];
         let size = bytes;
         let unitIndex = 0;
@@ -146,130 +212,165 @@ export function TeamChat({ groupId, groupName }: TeamChatProps) {
         }
     };
 
-    const getMediaColor = (type: string) => {
-        switch (type) {
-            case 'photo':
-            case 'image':
-                return 'text-green-500 bg-green-500/10';
-            case 'video':
-                return 'text-purple-500 bg-purple-500/10';
-            case 'audio':
-                return 'text-orange-500 bg-orange-500/10';
-            case 'document':
-                return 'text-blue-500 bg-blue-500/10';
-            default:
-                return 'text-gray-500 bg-gray-500/10';
-        }
-    };
-
     return (
         <div className="flex-1 flex flex-col bg-telegram-bg overflow-hidden">
-            <div className="px-6 py-4 border-b border-telegram-border bg-telegram-surface flex-shrink-0">
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-telegram-primary/20 flex items-center justify-center">
-                        <MessageSquare className="w-5 h-5 text-telegram-primary" />
+            <div className="h-16 px-4 border-b border-telegram-border bg-telegram-surface flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-11 h-11 rounded-full bg-telegram-primary/15 text-telegram-primary flex items-center justify-center overflow-hidden">
+                        {isDirect ? (
+                            <TelegramAvatar user={{ user_id: groupId ?? 'self', first_name: groupName }} token={streamToken} size="lg" className="border-0" />
+                        ) : (
+                            <Users className="w-5 h-5" />
+                        )}
                     </div>
-                    <div>
-                        <h2 className="text-lg font-semibold text-telegram-text">{groupName}</h2>
-                        <p className="text-xs text-telegram-subtext">Last 2 days • {messages.length} messages</p>
+                    <div className="min-w-0">
+                        <h2 className="text-base font-semibold text-telegram-text truncate">{groupName}</h2>
+                        <p className="text-xs text-telegram-subtext truncate">
+                            {isDirect ? 'direct chat' : `${memberCount ?? 0} members`}
+                        </p>
                     </div>
+                </div>
+
+                <div className="flex items-center gap-1">
+                    <button className="p-2 text-telegram-subtext hover:text-telegram-text hover:bg-telegram-hover rounded-full transition-colors" title="Search">
+                        <Search className="w-5 h-5" />
+                    </button>
+                    <button className="p-2 text-telegram-subtext hover:text-telegram-text hover:bg-telegram-hover rounded-full transition-colors" title="Start meeting">
+                        <Video className="w-5 h-5" />
+                    </button>
+                    {canManageMembers && !isDirect && (
+                        <button
+                            onClick={onManageMembers}
+                            className="p-2 text-telegram-subtext hover:text-telegram-text hover:bg-telegram-hover rounded-full transition-colors"
+                            title="Manage members"
+                        >
+                            <UserPlus className="w-5 h-5" />
+                        </button>
+                    )}
+                    <button className="p-2 text-telegram-subtext hover:text-telegram-text hover:bg-telegram-hover rounded-full transition-colors" title="More">
+                        <MoreVertical className="w-5 h-5" />
+                    </button>
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto px-4 py-5 custom-scrollbar">
                 {loading ? (
-                    <div className="flex items-center justify-center h-full">
-                        <div className="text-telegram-subtext">Loading messages...</div>
-                    </div>
+                    <div className="h-full flex items-center justify-center text-sm text-telegram-subtext">Loading messages...</div>
                 ) : error && messages.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-telegram-subtext">
-                        <MessageSquare className="w-12 h-12 mb-4 opacity-50" />
-                        <p className="text-red-500">Error loading messages</p>
-                        <p className="text-xs mt-2 max-w-md text-center">{error}</p>
-                        <button 
-                            onClick={loadMessages}
-                            className="mt-4 px-4 py-2 bg-telegram-primary text-white rounded-lg"
-                        >
+                    <div className="h-full flex flex-col items-center justify-center text-sm text-telegram-subtext">
+                        <p className="text-red-400">Error loading messages</p>
+                        <p className="mt-2 max-w-md text-center text-xs">{error}</p>
+                        <button onClick={() => loadMessages()} className="mt-4 px-4 py-2 bg-telegram-primary text-white rounded-lg">
                             Retry
                         </button>
                     </div>
                 ) : messages.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-telegram-subtext">
-                        <MessageSquare className="w-12 h-12 mb-4 opacity-50" />
-                        <p>No messages in the last 2 days</p>
-                        <p className="text-sm">Be the first to send a message!</p>
+                    <div className="h-full flex items-center justify-center text-sm text-telegram-subtext">
+                        No messages yet
                     </div>
                 ) : (
-                    messages.map((msg) => (
-                        <div
-                            key={msg.id}
-                            className="flex gap-3 p-4 bg-telegram-surface rounded-xl border border-telegram-border hover:border-telegram-primary/30 transition-colors"
-                        >
-                            <div className="w-10 h-10 rounded-full bg-telegram-primary/20 flex items-center justify-center flex-shrink-0">
-                                <span className="text-sm font-medium text-telegram-primary">
-                                    {msg.sender_name[0]?.toUpperCase() || '?'}
-                                </span>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                    <span className="text-sm font-medium text-telegram-text">{msg.sender_name}</span>
-                                    <span className="text-xs text-telegram-subtext">{formatDate(msg.date)}</span>
-                                </div>
-                                
-                                {msg.has_media && msg.media_type !== 'none' && (
-                                    <div className={`flex items-center gap-3 p-3 rounded-lg mb-2 ${getMediaColor(msg.media_type)}`}>
-                                        <div className="flex-shrink-0">
-                                            {getMediaIcon(msg.media_type)}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium text-telegram-text truncate">{msg.media_name}</p>
-                                            {msg.media_size > 0 && (
-                                                <p className="text-xs opacity-70">{formatFileSize(msg.media_size)}</p>
-                                            )}
-                                        </div>
-                                        <button
-                                            onClick={() => handleDownload(msg)}
-                                            disabled={downloadingId === msg.id}
-                                            className="p-2 hover:bg-white/10 rounded-lg transition-colors disabled:opacity-50"
-                                            title="Download"
+                    <div className="space-y-2">
+                        {messages.map((msg) => {
+                            const outgoing = Boolean(msg.outgoing);
+                            return (
+                                <div key={msg.id} className={`group flex ${outgoing ? 'justify-end' : 'justify-start'}`}>
+                                    <div className={`flex gap-2 max-w-[78%] ${outgoing ? 'flex-row-reverse' : ''}`}>
+                                        {!outgoing && !isDirect && (
+                                            <TelegramAvatar
+                                                user={{ user_id: msg.sender_id, first_name: msg.sender_name }}
+                                                token={streamToken}
+                                                size="md"
+                                                className="mt-1"
+                                            />
+                                        )}
+                                        <div
+                                            className={`rounded-2xl px-3 py-2 shadow-sm ${
+                                                outgoing
+                                                    ? 'rounded-br-md bg-telegram-primary text-white'
+                                                    : 'rounded-bl-md bg-telegram-surface text-telegram-text border border-telegram-border'
+                                            }`}
                                         >
-                                            {downloadingId === msg.id ? (
-                                                <File className="w-4 h-4 animate-pulse" />
-                                            ) : (
-                                                <Download className="w-4 h-4" />
+                                            {!outgoing && !isDirect && (
+                                                <p className="mb-1 text-xs font-semibold text-telegram-primary">{msg.sender_name}</p>
                                             )}
-                                        </button>
+                                            {msg.has_media && msg.media_type !== 'none' && (
+                                                <button
+                                                    onClick={() => handleDownload(msg)}
+                                                    disabled={downloadingId === msg.id}
+                                                    className={`mb-2 flex w-full min-w-56 items-center gap-3 rounded-xl p-3 text-left transition-colors ${
+                                                        outgoing ? 'bg-white/15 hover:bg-white/20' : 'bg-telegram-hover hover:bg-white/10'
+                                                    } disabled:opacity-60`}
+                                                >
+                                                    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15">
+                                                        {downloadingId === msg.id ? <File className="w-5 h-5 animate-pulse" /> : getMediaIcon(msg.media_type)}
+                                                    </span>
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="block truncate text-sm font-medium">{msg.media_name || msg.media_type}</span>
+                                                        {msg.media_size > 0 && <span className="text-xs opacity-75">{formatFileSize(msg.media_size)}</span>}
+                                                    </span>
+                                                    <Download className="w-4 h-4 opacity-75" />
+                                                </button>
+                                            )}
+                                            {msg.text && (
+                                                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{msg.text}</p>
+                                            )}
+                                            <div className={`mt-1 flex items-center justify-end gap-2 text-[10px] ${outgoing ? 'text-white/70' : 'text-telegram-subtext'}`}>
+                                                {msg.pinned && <Pin className="h-3 w-3" />}
+                                                <button
+                                                    onClick={() => handlePin(msg.id)}
+                                                    className="opacity-0 transition-opacity hover:opacity-100 group-hover:opacity-100"
+                                                    title="Pin message"
+                                                >
+                                                    <Pin className="h-3 w-3" />
+                                                </button>
+                                                <span>{formatTime(msg.date)}</span>
+                                            </div>
+                                        </div>
                                     </div>
-                                )}
-                                
-                                <p className="text-sm text-telegram-text whitespace-pre-wrap break-words">
-                                    {msg.text}
-                                </p>
-                            </div>
-                        </div>
-                    ))
+                                </div>
+                            );
+                        })}
+                    </div>
                 )}
                 <div ref={messagesEndRef} />
             </div>
 
-            <div className="p-4 border-t border-telegram-border bg-telegram-surface flex-shrink-0">
-                <div className="flex gap-3">
+            <div className="border-t border-telegram-border bg-telegram-surface p-3 flex-shrink-0">
+                <div className="flex items-end gap-2 rounded-2xl bg-telegram-hover px-2 py-2 border border-telegram-border">
+                    <button
+                        onClick={handleAttach}
+                        disabled={uploading}
+                        className="p-2 text-telegram-subtext hover:text-telegram-text rounded-full transition-colors disabled:opacity-50"
+                        title="Attach"
+                    >
+                        <Paperclip className={`w-5 h-5 ${uploading ? 'animate-pulse' : ''}`} />
+                    </button>
+                    <button onClick={handleMention} className="p-2 text-telegram-subtext hover:text-telegram-text rounded-full transition-colors" title="Mention">
+                        <AtSign className="w-5 h-5" />
+                    </button>
                     <input
+                        ref={inputRef}
                         type="text"
                         value={newMessage}
                         onChange={(e) => setNewMessage(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
-                        placeholder="Type a message..."
-                        className="flex-1 px-4 py-3 bg-telegram-hover rounded-xl text-telegram-text border border-telegram-border focus:border-telegram-primary outline-none transition-colors"
+                        placeholder="Message"
+                        className="min-h-10 flex-1 bg-transparent px-1 py-2 text-sm text-telegram-text placeholder:text-telegram-subtext outline-none"
                         disabled={sending}
                     />
+                    <button className="p-2 text-telegram-subtext hover:text-telegram-text rounded-full transition-colors" title="Emoji">
+                        <Smile className="w-5 h-5" />
+                    </button>
+                    <button onClick={handleVoice} className="p-2 text-telegram-subtext hover:text-telegram-text rounded-full transition-colors" title="Voice">
+                        <Mic className="w-5 h-5" />
+                    </button>
                     <button
                         onClick={handleSend}
                         disabled={!newMessage.trim() || sending}
-                        className="px-5 py-3 bg-telegram-primary text-white rounded-xl hover:bg-telegram-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        className="p-2 bg-telegram-primary text-white rounded-full hover:bg-telegram-primary/90 transition-colors disabled:opacity-50"
+                        title="Send"
                     >
-                        <Send className="w-4 h-4" />
-                        Send
+                        <Send className="w-5 h-5" />
                     </button>
                 </div>
             </div>

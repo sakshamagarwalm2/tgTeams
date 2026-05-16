@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Search, UserPlus, X, User, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, UserPlus, X, Loader2, UserMinus, Users, Contact } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
+import { TelegramAvatar } from './TelegramAvatar';
 
 interface TeamMember {
     user_id: string;
@@ -10,45 +11,53 @@ interface TeamMember {
     username?: string | null;
     phone?: string | null;
     photo_url?: string | null;
+    is_owner?: boolean;
+    is_admin?: boolean;
+    role?: string;
     access_hash?: string; // Added to help with invitations
 }
 
 interface AddSubscriberModalProps {
     teamId: number;
+    canManageMembers?: boolean;
     onClose: () => void;
     onSuccess?: () => void;
 }
 
-export function AddSubscriberModal({ teamId, onClose, onSuccess }: AddSubscriberModalProps) {
+export function AddSubscriberModal({ teamId, canManageMembers = true, onClose, onSuccess }: AddSubscriberModalProps) {
+    const [activeTab, setActiveTab] = useState<'members' | 'contacts'>('members');
     const [searchTerm, setSearchTerm] = useState('');
     const [results, setResults] = useState<TeamMember[]>([]);
     const [contacts, setContacts] = useState<TeamMember[]>([]);
+    const [members, setMembers] = useState<TeamMember[]>([]);
+    const [membersLoading, setMembersLoading] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [isAdding, setIsAdding] = useState<string | null>(null);
+    const [isRemoving, setIsRemoving] = useState<string | null>(null);
     const [streamToken, setStreamToken] = useState<string>('');
 
     useEffect(() => {
+        loadMembers();
         loadContacts();
         invoke<string>('cmd_get_stream_token').then(setStreamToken).catch(console.error);
     }, []);
 
-    const getAvatarUrl = (userId: string) => {
-        if (!streamToken) return null;
-        return `http://127.0.0.1:1421/avatar/${userId}?token=${streamToken}`;
-    };
+    useEffect(() => {
+        if (activeTab === 'contacts' && searchTerm.length >= 2) {
+            handleSearch(searchTerm);
+        }
+    }, [activeTab]);
 
-    const getInitials = (member: TeamMember) => {
-        return member.first_name[0] || '?';
-    };
-
-    const getBgColor = (id: string) => {
-        const colors = [
-            'bg-red-500', 'bg-green-500', 'bg-blue-500', 
-            'bg-yellow-500', 'bg-purple-500', 'bg-pink-500', 
-            'bg-indigo-500', 'bg-teal-500'
-        ];
-        const numId = parseInt(id.slice(-4)) || 0;
-        return colors[numId % colors.length];
+    const loadMembers = async () => {
+        try {
+            setMembersLoading(true);
+            const res = await invoke<TeamMember[]>('cmd_get_team_members', { teamId });
+            setMembers(res);
+        } catch (e) {
+            console.error('Failed to load members:', e);
+        } finally {
+            setMembersLoading(false);
+        }
     };
 
     const loadContacts = async () => {
@@ -62,7 +71,7 @@ export function AddSubscriberModal({ teamId, onClose, onSuccess }: AddSubscriber
 
     const handleSearch = async (term: string) => {
         setSearchTerm(term);
-        if (term.length < 3) {
+        if (term.length < 2 || activeTab === 'members') {
             setResults([]);
             return;
         }
@@ -78,7 +87,10 @@ export function AddSubscriberModal({ teamId, onClose, onSuccess }: AddSubscriber
         }
     };
 
+    const isExistingMember = (userId: string) => members.some(member => member.user_id === userId);
+
     const handleAdd = async (member: TeamMember) => {
+        if (isExistingMember(member.user_id)) return;
         setIsAdding(member.user_id);
         try {
             await invoke('cmd_add_team_member', { 
@@ -87,7 +99,8 @@ export function AddSubscriberModal({ teamId, onClose, onSuccess }: AddSubscriber
                 accessHashStr: member.access_hash
             });
             toast.success(`Successfully invited ${member.first_name}`);
-            if (onSuccess) onSuccess();
+            await loadMembers();
+            onSuccess?.();
         } catch (e) {
             toast.error(`Failed to add: ${e}`);
         } finally {
@@ -95,25 +108,78 @@ export function AddSubscriberModal({ teamId, onClose, onSuccess }: AddSubscriber
         }
     };
 
-    const displayList = searchTerm.length >= 3 ? results : contacts;
+    const handleRemove = async (member: TeamMember) => {
+        setIsRemoving(member.user_id);
+        try {
+            await invoke('cmd_remove_team_member', {
+                teamId,
+                userIdStr: member.user_id,
+                accessHashStr: member.access_hash,
+            });
+            toast.success(`Removed ${member.first_name}`);
+            await loadMembers();
+            onSuccess?.();
+        } catch (e) {
+            toast.error(`Failed to remove: ${e}`);
+        } finally {
+            setIsRemoving(null);
+        }
+    };
+
+    const filteredMembers = members.filter(member => {
+        const haystack = `${member.first_name} ${member.last_name || ''} ${member.username || ''} ${member.phone || ''}`.toLowerCase();
+        return haystack.includes(searchTerm.toLowerCase());
+    });
+
+    const displayContacts = searchTerm.length >= 2 ? results : contacts;
 
     return (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4" onClick={onClose}>
-            <div className="bg-telegram-surface border border-telegram-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="bg-telegram-surface border border-telegram-border rounded-xl w-full max-w-lg shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className="p-4 border-b border-telegram-border flex items-center justify-between">
-                    <h3 className="font-semibold text-telegram-text">Add Subscriber</h3>
+                    <div>
+                        <h3 className="font-semibold text-telegram-text">Team Members</h3>
+                        <p className="text-xs text-telegram-subtext">{members.length} current members</p>
+                    </div>
                     <button onClick={onClose} className="p-1 hover:bg-telegram-hover rounded-full transition-colors">
                         <X className="w-5 h-5 text-telegram-subtext" />
                     </button>
                 </div>
 
                 <div className="p-4">
+                    <div className="grid grid-cols-2 gap-2 mb-4 rounded-lg bg-telegram-hover p-1">
+                        <button
+                            onClick={() => setActiveTab('members')}
+                            className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'members' ? 'bg-telegram-surface text-telegram-text shadow-sm' : 'text-telegram-subtext hover:text-telegram-text'}`}
+                        >
+                            <Users className="w-4 h-4" />
+                            Members
+                        </button>
+                        {canManageMembers ? (
+                            <button
+                                onClick={() => setActiveTab('contacts')}
+                                className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'contacts' ? 'bg-telegram-surface text-telegram-text shadow-sm' : 'text-telegram-subtext hover:text-telegram-text'}`}
+                            >
+                                <Contact className="w-4 h-4" />
+                                Contacts
+                            </button>
+                        ) : (
+                            <button
+                                className="flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm text-telegram-subtext opacity-60"
+                                disabled
+                            >
+                                <Contact className="w-4 h-4" />
+                                Contacts
+                            </button>
+                        )}
+                    </div>
+
                     <div className="relative mb-4">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-telegram-subtext" />
                         <input
                             autoFocus
                             type="text"
-                            placeholder="Search people or usernames..."
+                            placeholder={activeTab === 'members' ? 'Search current members...' : 'Search contacts or @username...'}
                             className="w-full bg-telegram-hover border border-telegram-border rounded-xl pl-10 pr-4 py-2 text-sm text-telegram-text focus:outline-none focus:border-telegram-primary/50 transition-colors"
                             value={searchTerm}
                             onChange={(e) => handleSearch(e.target.value)}
@@ -126,24 +192,46 @@ export function AddSubscriberModal({ teamId, onClose, onSuccess }: AddSubscriber
                     </div>
 
                     <div className="max-h-[300px] overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-                        {displayList.length > 0 ? (
-                            displayList.map(member => (
-                                <div key={member.user_id} className="flex items-center gap-3 p-2 hover:bg-telegram-hover rounded-xl transition-colors group">
-                                    <div className="w-10 h-10 rounded-full border border-telegram-border flex items-center justify-center overflow-hidden">
-                                        <img 
-                                            src={getAvatarUrl(member.user_id) || ''} 
-                                            alt="" 
-                                            className="w-full h-full object-cover"
-                                            onError={(e) => {
-                                                (e.target as HTMLImageElement).style.display = 'none';
-                                                const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
-                                                if (fallback) fallback.style.display = 'flex';
-                                            }}
-                                        />
-                                        <div className={`w-full h-full hidden items-center justify-center text-white text-xs font-bold ${getBgColor(member.user_id)}`}>
-                                            {getInitials(member)}
+                        {activeTab === 'members' ? (
+                            membersLoading ? (
+                                <div className="py-8 text-center text-sm text-telegram-subtext">Loading members...</div>
+                            ) : filteredMembers.length > 0 ? (
+                                filteredMembers.map(member => (
+                                    <div key={member.user_id} className="flex items-center gap-3 p-2 hover:bg-telegram-hover rounded-xl transition-colors group">
+                                        <TelegramAvatar user={member} token={streamToken} size="lg" />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-medium text-telegram-text truncate">
+                                                {member.first_name} {member.last_name || ''}
+                                            </p>
+                                            <p className="text-xs text-telegram-subtext truncate">
+                                                {member.username ? `@${member.username}` : member.phone || member.role || 'Member'}
+                                            </p>
                                         </div>
+                                        {canManageMembers && !member.is_owner && (
+                                            <button
+                                                onClick={() => handleRemove(member)}
+                                                disabled={isRemoving !== null}
+                                                className="p-2 hover:bg-red-500/10 text-red-400 rounded-lg transition-all disabled:opacity-50"
+                                                title="Remove member"
+                                            >
+                                                {isRemoving === member.user_id ? (
+                                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                                ) : (
+                                                    <UserMinus className="w-4 h-4" />
+                                                )}
+                                            </button>
+                                        )}
                                     </div>
+                                ))
+                            ) : (
+                                <div className="py-8 text-center text-sm text-telegram-subtext">No members found</div>
+                            )
+                        ) : canManageMembers && displayContacts.length > 0 ? (
+                            displayContacts.map(member => {
+                                const alreadyAdded = isExistingMember(member.user_id);
+                                return (
+                                <div key={member.user_id} className="flex items-center gap-3 p-2 hover:bg-telegram-hover rounded-xl transition-colors group">
+                                    <TelegramAvatar user={member} token={streamToken} size="lg" />
                                     <div className="flex-1 min-w-0">
                                         <p className="text-sm font-medium text-telegram-text truncate">
                                             {member.first_name} {member.last_name || ''}
@@ -154,8 +242,9 @@ export function AddSubscriberModal({ teamId, onClose, onSuccess }: AddSubscriber
                                     </div>
                                     <button
                                         onClick={() => handleAdd(member)}
-                                        disabled={isAdding !== null}
+                                        disabled={isAdding !== null || alreadyAdded}
                                         className="p-2 bg-telegram-primary/10 hover:bg-telegram-primary text-telegram-primary hover:text-white rounded-lg transition-all disabled:opacity-50"
+                                        title={alreadyAdded ? 'Already a member' : 'Add member'}
                                     >
                                         {isAdding === member.user_id ? (
                                             <Loader2 className="w-4 h-4 animate-spin" />
@@ -164,11 +253,11 @@ export function AddSubscriberModal({ teamId, onClose, onSuccess }: AddSubscriber
                                         )}
                                     </button>
                                 </div>
-                            ))
+                            )})
                         ) : (
                             <div className="py-8 text-center">
                                 <p className="text-sm text-telegram-subtext">
-                                    {searchTerm.length >= 3 ? 'No results found' : 'Showing your contacts'}
+                                    {searchTerm.length >= 2 ? 'No results found' : 'No Telegram contacts found'}
                                 </p>
                             </div>
                         )}
@@ -177,7 +266,7 @@ export function AddSubscriberModal({ teamId, onClose, onSuccess }: AddSubscriber
 
                 <div className="p-4 bg-telegram-hover/50 text-center">
                     <p className="text-[10px] text-telegram-subtext uppercase tracking-wider font-bold">
-                        Tip: You can search by name or @username
+                        Search contacts by name, phone, or @username
                     </p>
                 </div>
             </div>

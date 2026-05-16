@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { TelegramAvatar } from './TelegramAvatar';
 
 interface Member {
     user_id: string;
@@ -35,53 +36,16 @@ export function MemberStack({ members, maxDisplay = 3, size = 'md' }: MemberStac
         lg: '-ml-4'
     };
 
-    const getInitials = (member: Member) => {
-        return member.first_name[0] || '?';
-    };
-
-    const getBgColor = (id: string) => {
-        // Telegram-like colors based on user_id
-        const colors = [
-            'bg-[#ff516a]', // Red
-            'bg-[#ffa85c]', // Orange
-            'bg-[#8e85ee]', // Violet
-            'bg-[#70d05b]', // Green
-            'bg-[#64d9f3]', // Cyan
-            'bg-[#3ca5f0]', // Blue
-            'bg-[#ff6c9a]', // Pink
-        ];
-        const strId = String(id);
-        const numId = parseInt(strId.slice(-4)) || 0;
-        return colors[numId % colors.length];
-    };
-
-    const getAvatarUrl = (userId: string) => {
-        if (!streamToken) return null;
-        return `http://127.0.0.1:1421/avatar/${userId}?token=${streamToken}`;
-    };
-
     return (
         <div className="flex items-center">
             {displayMembers.map((member, index) => (
-                <div
+                <TelegramAvatar
                     key={member.user_id}
-                    className={`${sizeClasses[size]} rounded-full border-2 border-telegram-surface flex items-center justify-center text-white font-medium overflow-hidden relative ${index > 0 ? overlapClasses[size] : ''} z-[${maxDisplay - index}]`}
-                    title={`${member.first_name} ${member.last_name || ''}`}
-                >
-                    <img 
-                        src={getAvatarUrl(member.user_id) || ''} 
-                        alt={member.first_name} 
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none';
-                            const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
-                            if (fallback) fallback.style.display = 'flex';
-                        }}
-                    />
-                    <div className={`w-full h-full hidden items-center justify-center ${getBgColor(member.user_id)}`}>
-                        {getInitials(member)}
-                    </div>
-                </div>
+                    user={member}
+                    token={streamToken}
+                    size={size}
+                    className={`${index > 0 ? overlapClasses[size] : ''}`}
+                />
             ))}
             {extraCount > 0 && (
                 <div

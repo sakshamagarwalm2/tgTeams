@@ -43,7 +43,6 @@ pub async fn resolve_peer(
                     };
                     Some(id)
                 },
-                _ => None,
             };
             if let Some(id) = peer_id {
                 cache.insert(id, dialog.peer.clone());

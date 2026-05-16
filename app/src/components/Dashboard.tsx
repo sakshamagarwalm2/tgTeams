@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { TelegramFile, BandwidthStats } from '../types';
 import { formatBytes } from '../utils';
 
-import { Search, Loader2, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 // Components
 import { Sidebar } from './dashboard/Sidebar';
@@ -44,10 +44,12 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     const [searchResults, setSearchResults] = useState<TelegramFile[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [internalDragFileId, _setInternalDragFileId] = useState<number | null>(null);
+    const [activeCompanyManagement, setActiveCompanyManagement] = useState(false);
     const [activeGroupId, setActiveGroupId] = useState<number | null>(null);
     const [groups, setGroups] = useState<{id: number, name: string, username: string | null, member_count: number}[]>([]);
     const [activeMembers, setActiveMembers] = useState<any[]>([]);
     const [showAddSubscriber, setShowAddSubscriber] = useState(false);
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const internalDragRef = useRef<number | null>(null);
 
     const loadGroups = async () => {
@@ -75,6 +77,9 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
     useEffect(() => {
         loadGroups();
+        invoke<{ user_id: string } | null>('cmd_get_current_user')
+            .then((user) => setCurrentUserId(user?.user_id || null))
+            .catch(console.error);
     }, []);
 
     useEffect(() => {
@@ -249,6 +254,10 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
         ? "Saved Messages"
         : folders.find(f => f.id === activeFolderId)?.name || "Folder";
 
+    const canManageActiveGroup = activeGroupId !== null && activeMembers.some(member => (
+        String(member.user_id) === currentUserId && (member.is_admin || member.is_owner)
+    ));
+
     const handleRootDragOver = (e: React.DragEvent) => {
         if (internalDragRef.current) {
             e.preventDefault();
@@ -293,6 +302,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                 setActiveFolderId={setActiveFolderId}
                 activeGroupId={activeGroupId}
                 setActiveGroupId={setActiveGroupId}
+                activeCompanyManagement={activeCompanyManagement}
+                setActiveCompanyManagement={setActiveCompanyManagement}
                 onDrop={handleDropOnFolder}
                 onDelete={handleFolderDelete}
                 onRename={handleFolderRename}
@@ -305,21 +316,34 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
             />
 
             <main className="flex-1 flex flex-col overflow-hidden" onClick={(e) => { if (e.target === e.currentTarget) setSelectedIds([]); }}>
-                {activeGroupId !== null ? (
+                {activeCompanyManagement ? (
+                    <div className="flex-1 flex flex-col min-h-0 relative">
+                        <TeamChat
+                            groupId={null}
+                            groupName="Company Management"
+                            isDirect
+                        />
+                    </div>
+                ) : activeGroupId !== null ? (
                     <div className="flex-1 flex flex-col min-h-0 relative">
                         <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
                             <MemberStack members={activeMembers} size="sm" />
-                            <button
-                                onClick={() => setShowAddSubscriber(true)}
-                                className="w-8 h-8 rounded-full bg-telegram-primary/10 hover:bg-telegram-primary/20 text-telegram-primary flex items-center justify-center transition-all shadow-sm active:scale-95"
-                                title="Add Subscriber"
-                            >
-                                <Plus className="w-4 h-4" />
-                            </button>
+                            {canManageActiveGroup && (
+                                <button
+                                    onClick={() => setShowAddSubscriber(true)}
+                                    className="w-8 h-8 rounded-full bg-telegram-primary/10 hover:bg-telegram-primary/20 text-telegram-primary flex items-center justify-center transition-all shadow-sm active:scale-95"
+                                    title="Add Member"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                </button>
+                            )}
                         </div>
                         <TeamChat 
                             groupId={activeGroupId} 
                             groupName={groups.find(g => g.id === activeGroupId)?.name || 'Group Chat'}
+                            memberCount={groups.find(g => g.id === activeGroupId)?.member_count || activeMembers.length}
+                            canManageMembers={canManageActiveGroup}
+                            onManageMembers={() => setShowAddSubscriber(true)}
                         />
                     </div>
                 ) : (
@@ -386,6 +410,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
             {showAddSubscriber && (activeFolderId || activeGroupId) && (
                 <AddSubscriberModal
                     teamId={(activeFolderId || activeGroupId)!}
+                    canManageMembers={activeGroupId !== null ? canManageActiveGroup : true}
                     onClose={() => setShowAddSubscriber(false)}
                     onSuccess={() => loadActiveMembers(activeFolderId || activeGroupId)}
                 />

@@ -137,11 +137,13 @@ export function SidebarItem({
             <span className="flex-1 text-left truncate">{label}</span>
             
             <div className="flex items-center gap-2">
-                {topMembers && topMembers.length > 0 && (
+                {topMembers && topMembers.length > 0 ? (
                     <div className={active ? '' : 'opacity-0 group-hover:opacity-100 transition-opacity'}>
                         <MemberStack members={topMembers} size="sm" maxDisplay={2} />
                     </div>
-                )}
+                ) : memberCount !== undefined && memberCount > 0 ? (
+                    <span className="text-[10px] text-telegram-subtext tabular-nums">{memberCount}</span>
+                ) : null}
                 
                 {folderId !== null && (
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

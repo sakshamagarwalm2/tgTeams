@@ -1,11 +1,17 @@
 import { useState, useEffect } from 'react';
-import { HardDrive, Folder, Plus, RefreshCw, LogOut, Users, LayoutGrid, ChevronDown, ChevronRight, Settings, MessageSquare } from 'lucide-react';
+import { Building2, HardDrive, Folder, Plus, RefreshCw, LogOut, Users, LayoutGrid, ChevronDown, ChevronRight, Settings, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { SidebarItem } from './SidebarItem';
 import { BandwidthWidget } from './BandwidthWidget';
-import { TeamsPanel } from './TeamsPanel';
 import { MemberStack } from './MemberStack';
+import { TeamVisibilityModal } from './TeamVisibilityModal';
+import {
+    isTeamVisible,
+    readTeamVisibility,
+    TEAM_VISIBILITY_CHANGED_EVENT,
+    TeamVisibilitySettings,
+} from './teamVisibility';
 import { TelegramFolder, BandwidthStats } from '../../types';
 
 interface GroupInfo {
@@ -16,12 +22,22 @@ interface GroupInfo {
     top_members?: any[];
 }
 
+interface ContactInfo {
+    user_id: string;
+    first_name: string;
+    last_name?: string | null;
+    username?: string | null;
+    phone?: string | null;
+}
+
 interface SidebarProps {
     folders: TelegramFolder[];
     activeFolderId: number | null;
     setActiveFolderId: (id: number | null) => void;
     activeGroupId: number | null;
     setActiveGroupId: (id: number | null) => void;
+    activeCompanyManagement: boolean;
+    setActiveCompanyManagement: (active: boolean) => void;
     onDrop: (e: React.DragEvent, folderId: number | null) => void;
     onDelete: (id: number, name: string) => void;
     onRename: (id: number, currentName: string, newName: string) => void;
@@ -34,18 +50,33 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-    folders, activeFolderId, setActiveFolderId, activeGroupId, setActiveGroupId, onDrop, onDelete, onRename, onCreate,
+    folders, activeFolderId, setActiveFolderId, activeGroupId, setActiveGroupId, activeCompanyManagement, setActiveCompanyManagement, onDrop, onDelete, onRename, onCreate,
     isSyncing, isConnected, onSync, onLogout, bandwidth
 }: SidebarProps) {
     const [showNewFolderInput, setShowNewFolderInput] = useState(false);
     const [newFolderName, setNewFolderName] = useState("");
     const [driveExpanded, setDriveExpanded] = useState(true);
     const [teamsExpanded, setTeamsExpanded] = useState(true);
-    const [showTeamsPanel, setShowTeamsPanel] = useState(false);
+    const [showVisibilitySettings, setShowVisibilitySettings] = useState(false);
     const [groups, setGroups] = useState<GroupInfo[]>([]);
+    const [contacts, setContacts] = useState<ContactInfo[]>([]);
+    const [streamToken, setStreamToken] = useState('');
+    const [teamVisibility, setTeamVisibility] = useState<TeamVisibilitySettings>(() => readTeamVisibility());
 
     useEffect(() => {
         loadGroups();
+        loadContacts();
+        invoke<string>('cmd_get_stream_token').then(setStreamToken).catch(console.error);
+    }, []);
+
+    useEffect(() => {
+        const handleVisibilityChange = () => setTeamVisibility(readTeamVisibility());
+        window.addEventListener(TEAM_VISIBILITY_CHANGED_EVENT, handleVisibilityChange);
+        window.addEventListener('storage', handleVisibilityChange);
+        return () => {
+            window.removeEventListener(TEAM_VISIBILITY_CHANGED_EVENT, handleVisibilityChange);
+            window.removeEventListener('storage', handleVisibilityChange);
+        };
     }, []);
 
     const loadGroups = async () => {
@@ -54,6 +85,15 @@ export function Sidebar({
             setGroups(result);
         } catch (e) {
             console.error('Failed to load groups:', e);
+        }
+    };
+
+    const loadContacts = async () => {
+        try {
+            const result = await invoke<ContactInfo[]>('cmd_get_contacts');
+            setContacts(result);
+        } catch (e) {
+            console.error('Failed to load contacts:', e);
         }
     };
 
@@ -79,6 +119,8 @@ export function Sidebar({
         }
     };
 
+    const visibleGroups = groups.filter(group => isTeamVisible(group.id, teamVisibility));
+
     return (
         <aside className="w-64 bg-telegram-surface border-r border-telegram-border flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="p-4 flex items-center gap-2">
@@ -87,6 +129,21 @@ export function Sidebar({
             </div>
 
             <nav className="flex-1 px-2 py-4 space-y-6 overflow-y-auto min-h-0">
+                <div>
+                    <SidebarItem
+                        icon={Building2}
+                        label="Company Management"
+                        active={activeCompanyManagement}
+                        onClick={() => {
+                            setActiveCompanyManagement(true);
+                            setActiveFolderId(null);
+                            setActiveGroupId(null);
+                        }}
+                        onDrop={(e: React.DragEvent) => onDrop(e, null)}
+                        folderId={null}
+                    />
+                </div>
+
                 <div>
                     <button
                         onClick={() => setDriveExpanded(!driveExpanded)}
@@ -111,8 +168,9 @@ export function Sidebar({
                                 <SidebarItem
                                     icon={LayoutGrid}
                                     label="Saved Messages"
-                                    active={activeFolderId === null && activeGroupId === null}
+                                    active={!activeCompanyManagement && activeFolderId === null && activeGroupId === null}
                                     onClick={() => {
+                                        setActiveCompanyManagement(false);
                                         setActiveFolderId(null);
                                         setActiveGroupId(null);
                                     }}
@@ -126,6 +184,7 @@ export function Sidebar({
                                         label={folder.name}
                                         active={activeFolderId === folder.id}
                                         onClick={() => {
+                                            setActiveCompanyManagement(false);
                                             setActiveFolderId(folder.id);
                                             setActiveGroupId(null);
                                         }}
@@ -168,16 +227,25 @@ export function Sidebar({
                 </div>
 
                 <div>
-                    <button
-                        onClick={() => setTeamsExpanded(!teamsExpanded)}
-                        className="w-full px-3 mb-2 flex items-center justify-between group"
-                    >
-                        <div className="flex items-center gap-2 text-[10px] font-bold text-telegram-subtext uppercase tracking-[0.1em] group-hover:text-telegram-text transition-colors">
-                            <Users className="w-3 h-3" />
-                            Groups
-                        </div>
-                        {teamsExpanded ? <ChevronDown className="w-3 h-3 text-telegram-subtext" /> : <ChevronRight className="w-3 h-3 text-telegram-subtext" />}
-                    </button>
+                    <div className="w-full px-3 mb-2 flex items-center justify-between group">
+                        <button
+                            onClick={() => setTeamsExpanded(!teamsExpanded)}
+                            className="min-w-0 flex flex-1 items-center justify-between"
+                        >
+                            <div className="flex items-center gap-2 text-[10px] font-bold text-telegram-subtext uppercase tracking-[0.1em] group-hover:text-telegram-text transition-colors">
+                                <Users className="w-3 h-3" />
+                                Teams
+                            </div>
+                            {teamsExpanded ? <ChevronDown className="w-3 h-3 text-telegram-subtext" /> : <ChevronRight className="w-3 h-3 text-telegram-subtext" />}
+                        </button>
+                        <button
+                            onClick={() => setShowVisibilitySettings(true)}
+                            className="ml-2 rounded-md p-1 text-telegram-subtext hover:bg-telegram-hover hover:text-telegram-text"
+                            title="Choose visible teams"
+                        >
+                            <Settings className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
 
                     <AnimatePresence initial={false}>
                         {teamsExpanded && (
@@ -188,10 +256,11 @@ export function Sidebar({
                                 transition={{ duration: 0.2 }}
                                 className="overflow-hidden space-y-1"
                             >
-                                {groups.map(group => (
+                                {visibleGroups.map(group => (
                                     <button
                                         key={group.id}
                                         onClick={() => {
+                                            setActiveCompanyManagement(false);
                                             setActiveGroupId(group.id);
                                             setActiveFolderId(null);
                                         }}
@@ -216,17 +285,10 @@ export function Sidebar({
                                 <div className="flex gap-2 pt-2">
                                     <button
                                         onClick={handleCreateGroup}
-                                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-telegram-subtext hover:bg-telegram-hover hover:text-telegram-text transition-all border border-dashed border-telegram-border/50"
+                                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-telegram-subtext hover:bg-telegram-hover hover:text-telegram-text transition-all border border-dashed border-telegram-border/50"
                                     >
                                         <Plus className="w-3 h-3" />
                                         New
-                                    </button>
-                                    <button
-                                        onClick={() => setShowTeamsPanel(true)}
-                                        className="p-2 rounded-lg text-telegram-subtext hover:bg-telegram-hover hover:text-telegram-text transition-all"
-                                        title="Group Manager"
-                                    >
-                                        <Settings className="w-4 h-4" />
                                     </button>
                                 </div>
                             </motion.div>
@@ -262,25 +324,15 @@ export function Sidebar({
                 {bandwidth && <BandwidthWidget bandwidth={bandwidth} />}
             </div>
 
-            {showTeamsPanel && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex">
-                    <div className="ml-64 w-[800px] bg-telegram-surface rounded-r-xl border border-telegram-border overflow-hidden">
-                        <div className="flex items-center justify-between p-4 border-b border-telegram-border">
-                            <h2 className="text-lg font-semibold text-telegram-text">Group Manager</h2>
-                            <button
-                                onClick={() => setShowTeamsPanel(false)}
-                                className="p-2 hover:bg-telegram-hover rounded-lg"
-                            >
-                                <svg className="w-5 h-5 text-telegram-text" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        </div>
-                        <div className="h-[calc(100%-60px)]">
-                            <TeamsPanel onGroupCreated={loadGroups} />
-                        </div>
-                    </div>
-                </div>
+            {showVisibilitySettings && (
+                <TeamVisibilityModal
+                    teams={groups}
+                    contacts={contacts}
+                    settings={teamVisibility}
+                    streamToken={streamToken}
+                    onClose={() => setShowVisibilitySettings(false)}
+                    onChange={setTeamVisibility}
+                />
             )}
         </aside>
     )
